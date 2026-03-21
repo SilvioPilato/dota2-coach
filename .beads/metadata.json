@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "dota_analysis",
+  "project_id": "4e268f3e-5587-4e23-ac78-2b29ff56b4fa"
+}
