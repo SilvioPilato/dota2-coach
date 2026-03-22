@@ -169,6 +169,16 @@ def detect_errors(
             threshold="< 8 wards placed is underperforming for support",
         ))
 
+    # Deward rule (pos 4/5): low deward percentage
+    if ward_rule == "require_minimum" and metrics.deward_pct is not None and metrics.deward_pct < 0.30:
+        errors.append(DetectedError(
+            category="Low deward rate",
+            description="Dewarded fewer than 30% of enemy wards — vision control is lacking",
+            severity="medium",
+            metric_value=f"{metrics.deward_pct:.0%} of enemy wards dewarded",
+            threshold="< 30% deward rate is below expectations for a support",
+        ))
+
     # ===================================================================
     # v1 ABSOLUTE RULES (only when no enrichment provided — backward compat)
     # ===================================================================

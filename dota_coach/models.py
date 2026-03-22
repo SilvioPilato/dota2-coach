@@ -62,6 +62,7 @@ class MatchMetrics(BaseModel):
     ward_placements: Optional[int] = None
     stacks_created: Optional[int] = None
     hero_healing: Optional[int] = None
+    deward_pct: Optional[float] = None
 
     # Game mode
     turbo: bool = False

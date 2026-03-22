@@ -236,6 +236,23 @@ def extract_metrics(
     # hero_healing: from match_meta players[] entry
     hero_healing_val: int | None = our_meta.get("hero_healing")
 
+    # deward_pct: fraction of enemy wards killed by our player
+    # obs/sen records track ward placements; obs_left/sen_left track ward deaths
+    # We count enemy ward placements (slot != our_parser_slot) and compare to
+    # obs_left/sen_left where attackername matches our hero npc name.
+    enemy_ward_count = sum(
+        1 for r in records
+        if r.get("type") in ("obs", "sen") and r.get("slot") != our_parser_slot
+    )
+    wards_dewarded = sum(
+        1 for r in records
+        if r.get("type") in ("obs_left", "sen_left")
+        and r.get("attackername") == our_npc_name
+    )
+    deward_pct_val: float | None = (
+        wards_dewarded / enemy_ward_count if enemy_ward_count > 0 else None
+    )
+
     total_last_hits = our_meta.get("last_hits", 0)
 
     return MatchMetrics(
@@ -265,6 +282,7 @@ def extract_metrics(
         ward_placements=ward_placements_val,
         stacks_created=stacks_created_val,
         hero_healing=hero_healing_val,
+        deward_pct=deward_pct_val,
         turbo=match_meta.get("game_mode") == 23,
     )
 

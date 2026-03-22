@@ -171,9 +171,11 @@ def build_user_message(
         lines.append(f"- Stacks created: {stacks}")
 
     elif role in (4, 5):
-        # Pos 4/5: ward placements, stacks, hero healing
+        # Pos 4/5: ward placements, deward_pct, stacks, hero healing
         wp = metrics.ward_placements if metrics.ward_placements is not None else 0
         lines.append(f"- Ward placements: {wp}")
+        if metrics.deward_pct is not None:
+            lines.append(f"- Deward rate: {metrics.deward_pct:.0%} of enemy wards removed")
         stacks = metrics.stacks_created if metrics.stacks_created is not None else 0
         lines.append(f"- Stacks created: {stacks}")
         healing = metrics.hero_healing if metrics.hero_healing is not None else 0
