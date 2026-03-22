@@ -88,9 +88,9 @@
 marked.use({ breaks: true });
 
 function mdToHtml(text) {
-  // Normalize "** bold**" / "**bold **" → "**bold**" (LLM sometimes adds spaces inside markers)
-  const normalized = text.replace(/\*\* +/g, '**').replace(/ +\*\*/g, '**');
-  return marked.parse(normalized);
+  // Downgrade h1/h2 → h3 so LLM headings don't blow up inside chat bubbles
+  const downgraded = text.replace(/^#{1,2} /gm, '### ');
+  return marked.parse(downgraded);
 }
 
 let lastMatchId = '';
@@ -408,7 +408,7 @@ async function sendChat() {
         if (!line.startsWith('data: ')) continue;
         const payload = line.slice(6);
         if (payload === '[DONE]') continue;
-        fullText += payload;
+        fullText += JSON.parse(payload);
         bubble.innerHTML = mdToHtml(fullText);
       }
       bubble.scrollIntoView({ behavior: 'smooth', block: 'end' });

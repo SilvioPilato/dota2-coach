@@ -1,6 +1,7 @@
 """FastAPI backend — orchestrates the full analysis + coaching pipeline."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -210,7 +211,7 @@ async def chat(request: ChatRequest):
 
     async def event_stream():
         async for chunk in stream_llm(messages, model):
-            yield f"data: {chunk}\n\n"
+            yield f"data: {json.dumps(chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
