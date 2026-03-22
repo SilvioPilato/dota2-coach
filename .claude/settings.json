@@ -16,7 +16,12 @@
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__fill",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__click",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(bd doctor:*)",
+      "Bash(bd migrate:*)",
+      "Bash(bd vc:*)"
     ]
   }
 }
