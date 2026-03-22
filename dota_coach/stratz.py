@@ -1,4 +1,4 @@
-"""Stratz GraphQL API client for accurate pos 1-5 role detection."""
+"""Stratz GraphQL API client for accurate pos 1-5 role detection and bracket benchmarks."""
 from __future__ import annotations
 
 import logging
@@ -19,7 +19,106 @@ query GetMatchPositions($matchId: Long!) {
 }
 """
 
+# Mapping from rank tier (rank_tier // 10) to STRATZ bracketBasicIds enum value
+# rank_tier values: 1=Herald, 2=Guardian, 3=Crusader, 4=Archon, 5=Legend, 6=Ancient, 7+=Divine/Immortal
+_RANK_TO_STRATZ_BRACKET: dict[int, str] = {
+    1: "HERALD_GUARDIAN",
+    2: "HERALD_GUARDIAN",
+    3: "CRUSADER_ARCHON",
+    4: "CRUSADER_ARCHON",
+    5: "LEGEND_ANCIENT",
+    6: "LEGEND_ANCIENT",
+    7: "DIVINE_IMMORTAL",
+    8: "DIVINE_IMMORTAL",
+}
+
+_BRACKET_BENCHMARKS_QUERY = """
+query HeroBracketBenchmarks($heroId: Short!, $bracketIds: [RankBracketBasicEnum]) {
+  heroStats {
+    stats(heroId: $heroId, bracketBasicIds: $bracketIds) {
+      goldPerMin { percentile value }
+      xpPerMin { percentile value }
+      lastHitsPerMin { percentile value }
+    }
+  }
+}
+"""
+
 logger = logging.getLogger(__name__)
+
+
+def rank_tier_to_stratz_bracket(rank_tier: int) -> str:
+    """Map an OpenDota rank_tier value to a STRATZ RankBracketBasicEnum string."""
+    rank_num = max(1, min(8, rank_tier // 10)) if rank_tier >= 10 else 1
+    return _RANK_TO_STRATZ_BRACKET.get(rank_num, "LEGEND_ANCIENT")
+
+
+async def get_hero_bracket_benchmarks(
+    hero_id: int,
+    bracket: str,
+) -> dict[str, list[dict]] | None:
+    """Fetch bracket-filtered hero benchmarks from STRATZ heroStats.
+
+    Returns a dict mapping metric name → list of {percentile, value} dicts,
+    in the same format as OpenDota benchmarks result. Returns None on any error
+    (caller should fall back to global OpenDota benchmarks).
+
+    Args:
+        hero_id: OpenDota/Dota2 hero ID
+        bracket:  STRATZ RankBracketBasicEnum value, e.g. "LEGEND_ANCIENT"
+    """
+    api_key = os.environ.get("STRATZ_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                STRATZ_GRAPHQL_URL,
+                json={
+                    "query": _BRACKET_BENCHMARKS_QUERY,
+                    "variables": {"heroId": hero_id, "bracketIds": [bracket]},
+                },
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "STRATZ_API",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+    except Exception as exc:
+        logger.warning("STRATZ bracket benchmark request failed for hero %s: %s", hero_id, exc)
+        return None
+
+    try:
+        stats_list = data["data"]["heroStats"]["stats"]
+        if not stats_list:
+            return None
+        stats = stats_list[0]
+    except (KeyError, TypeError, IndexError):
+        logger.warning("Unexpected STRATZ benchmark response shape for hero %s", hero_id)
+        return None
+
+    # Normalise: STRATZ uses camelCase keys; map to OpenDota snake_case
+    _KEY_MAP = {
+        "goldPerMin": "gold_per_min",
+        "xpPerMin": "xp_per_min",
+        "lastHitsPerMin": "last_hits_per_min",
+    }
+    result: dict[str, list[dict]] = {}
+    for stratz_key, odota_key in _KEY_MAP.items():
+        pts = stats.get(stratz_key)
+        if pts:
+            # Normalise percentile to 0-1 range (STRATZ may return 0-100)
+            normalised = [
+                {"percentile": p["percentile"] / 100.0 if p["percentile"] > 1 else p["percentile"],
+                 "value": p["value"]}
+                for p in pts
+            ]
+            result[odota_key] = normalised
+
+    return result if result else None
 
 
 async def get_match_positions(match_id: int) -> dict[int, int] | None:

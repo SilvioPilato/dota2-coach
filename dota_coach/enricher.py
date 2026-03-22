@@ -149,13 +149,31 @@ async def enrich(
         match_meta: OpenDota match metadata dict
         purchased_items: list of item internal names purchased (e.g. ["item_battle_fury"])
     """
+    from dota_coach.stratz import get_hero_bracket_benchmarks, rank_tier_to_stratz_bracket
+
     heroes_data = await _get_heroes_data()
     hero_id = _find_hero_id(metrics.hero, heroes_data)
 
+    # Determine player's bracket from their rank_tier in match_meta
+    our_player = next(
+        (p for p in match_meta.get("players", []) if p.get("account_id") is not None),
+        None,
+    )
+    rank_tier: int = (our_player or {}).get("rank_tier") or 0
+    bracket = rank_tier_to_stratz_bracket(rank_tier) if rank_tier else "LEGEND_ANCIENT"
+
     benchmarks_list: list[HeroBenchmark] = []
+    bracket_source = "global"
     if hero_id is not None:
-        bench_data = await _get_benchmarks_cached(hero_id)
-        bench_result = bench_data.get("result", {})
+        # Try STRATZ bracket-filtered benchmarks first (v3 feature)
+        stratz_bench = await get_hero_bracket_benchmarks(hero_id, bracket)
+        if stratz_bench is not None:
+            bench_result = stratz_bench
+            bracket_source = f"stratz_{bracket.lower()}"
+        else:
+            # Fall back to global OpenDota benchmarks
+            bench_data = await _get_benchmarks_cached(hero_id)
+            bench_result = bench_data.get("result", {})
 
         # Map metric names to (benchmark_key, player_value) pairs
         metric_map = {
@@ -207,4 +225,5 @@ async def enrich(
         benchmarks=benchmarks_list,
         item_costs=item_costs,
         hero_base_stats=hero_base_stats,
+        bracket_source=bracket_source,
     )
