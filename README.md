@@ -6,11 +6,18 @@ AI-powered coaching tool that analyzes Dota 2 replays and delivers role-aware, p
 
 - **All 5 roles** — auto-detected via [Stratz GraphQL API](https://stratz.com/api) (accurate pos 1–5), falling back to OpenDota GPM-ranking heuristic when no key is set
 - **Percentile-based error detection** — severity from global OpenDota benchmarks (critical < 20th, high < 35th, medium < 45th)
-- **Role-aware metrics** — each position observes different KPIs (GPM/LH for cores, wards/stacks/healing for supports)
+- **Bracket-filtered benchmarks** — when `STRATZ_API_KEY` is set, benchmarks are filtered to the player's MMR bracket instead of global percentiles
+- **Role-aware metrics** — each position observes different KPIs:
+  - Pos 1/2: GPM, LH@10, first core item, net worth deltas
+  - Pos 2 (mid): also `rune_control_pct`, `tower_damage`
+  - Pos 3 (offlaner): also stacks, `stun_time`, `initiation_rate`
+  - Pos 4/5 (supports): also ward placements, `deward_pct`, `stun_time`, hero healing
+- **Degraded mode** — when a Valve CDN replay has expired, falls back to OpenDota-only metrics (`gold_t`/`lh_t` arrays); a yellow banner in the UI signals degraded analysis
 - **Turbo mode** — detected automatically (`game_mode == 23`), uses absolute metrics with turbo-calibrated reference values
 - **Patch context** — current item costs and hero base stats injected into prompts via `dotaconstants`
 - **Replay cache** — decompressed `.dem` files cached to `~/.dota_coach/cache/` (7-day TTL); repeat analyses skip the ~100–500 MB download
 - **Analysis cache** — full coaching results cached by `match_id + account_id + role`; identical requests return instantly without re-running the LLM
+- **Match history** — every analysis is persisted to `~/.dota_coach/history.db` (SQLite); accessible via `GET /history/{account_id}`
 - **Browser persistence** — last result stored in `localStorage`; re-opening the page and re-submitting renders instantly without a server round-trip
 - **Follow-up chat** — ask the coach questions about your match via streaming SSE
 - **Web UI** — dark-themed single-page app with metric cards, benchmark bars, coaching report, chat panel, and Re-analyze / Re-download replay buttons
@@ -25,16 +32,18 @@ Browser / CLI
 FastAPI backend (api.py)
     │
     ├─► OpenDota API        → match metadata + replay URL
-    ├─► Stratz GraphQL API  → accurate pos 1–5 role (optional)
+    ├─► Stratz GraphQL API  → accurate pos 1–5 role + bracket benchmarks (optional)
     ├─► Analysis Cache      → short-circuit on cache hit (match+player+role)
     ├─► Valve CDN           → .dem.bz2 replay file (or .dem disk cache)
+    │       └─ ReplayExpiredError → OpenDota degraded fallback (gold_t / lh_t)
     ├─► odota parser        → NDJSON event log (localhost:5600)
     ├─► Extractor           → MatchMetrics (typed Pydantic model)
     ├─► Role Detector       → RoleProfile (pos 1–5)
-    ├─► Enricher            → benchmarks + patch data (disk-cached)
+    ├─► Enricher            → bracket or global benchmarks + patch data (disk-cached)
     ├─► Error Detector      → top 3 errors by severity
     ├─► Prompt Builder      → role-aware system + user message
-    └─► LiteLLM             → coaching report from any LLM provider
+    ├─► LiteLLM             → coaching report from any LLM provider
+    └─► History DB          → persist MatchReport to ~/.dota_coach/history.db
 ```
 
 ## Prerequisites
@@ -57,7 +66,7 @@ Create a `.env` file in the project root (or set these as environment variables)
 |----------|---------|-------------|
 | `LLM_MODEL` | `anthropic/claude-sonnet-4-6` | LiteLLM model identifier |
 | `ANTHROPIC_API_KEY` | — | API key (or equivalent for your provider) |
-| `STRATZ_API_KEY` | — | Optional. Enables accurate pos 1–5 role detection via [Stratz](https://stratz.com/api). Falls back to GPM-ranking heuristic if unset. |
+| `STRATZ_API_KEY` | — | Optional. Enables accurate pos 1–5 role detection and MMR-bracket-filtered benchmarks via [Stratz](https://stratz.com/api). Falls back to GPM-ranking heuristic + global OpenDota benchmarks if unset. |
 | `DOTA_COACH_TOKEN_BUDGET` | `800` | Max tokens for LLM user message |
 
 ## Usage
@@ -112,6 +121,10 @@ Full analysis pipeline — returns a `MatchReport` JSON.
 - `force_reanalyze` — skip analysis cache; re-run full pipeline (keeps cached `.dem`)
 - `force_redownload` — delete cached `.dem` and re-download; implies `force_reanalyze`
 
+#### `GET /history/{account_id}`
+
+Return stored match history for an account (newest first). Optional `?limit=N` query param (default 20).
+
 #### `POST /chat`
 
 Streaming follow-up questions (Server-Sent Events).
@@ -139,13 +152,14 @@ dota_coach/
 ├── detector.py     # Error detection — percentile-based + absolute rules
 ├── downloader.py   # Replay download from Valve CDN with persistent .dem cache
 ├── enricher.py     # Benchmark + patch data fetcher with disk cache
-├── extractor.py    # Parser NDJSON → MatchMetrics, build_timeline()
+├── extractor.py    # Parser NDJSON → MatchMetrics, build_timeline(), extract_metrics_from_opendota()
+├── history.py      # SQLite match history — save/load MatchReport per (match, account, role)
 ├── models.py       # Pydantic models — MatchMetrics, MatchReport, ChatRequest, etc.
 ├── opendota.py     # OpenDota API client — get_match(), get_benchmarks()
 ├── parser.py       # odota parser sidecar client
 ├── prompt.py       # LLM prompt builder — role-aware, turbo-aware, chat messages
 ├── role.py         # Role detection + ROLE_PROFILES (pos 1–5)
-└── stratz.py       # Stratz GraphQL client — get_match_positions() for pos 1–5 roles
+└── stratz.py       # Stratz GraphQL client — positions (pos 1–5) + bracket benchmarks
 
 static/
 ├── index.html      # Single-page frontend with chat panel
@@ -164,7 +178,7 @@ tests/
 ## Testing
 
 ```bash
-# Run all 159 tests
+# Run all tests
 pytest tests/ -v
 
 # Run a specific test file
