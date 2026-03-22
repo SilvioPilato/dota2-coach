@@ -247,6 +247,9 @@ def extract_metrics(
         len(our_rune_picks) / len(all_rune_picks) if all_rune_picks else None
     )
 
+    # tower_damage: total damage dealt to buildings, from match_meta
+    tower_damage_val: int | None = our_meta.get("tower_damage")
+
     # deward_pct: fraction of enemy wards killed by our player
     # obs/sen records track ward placements; obs_left/sen_left track ward deaths
     # We count enemy ward placements (slot != our_parser_slot) and compare to
@@ -296,6 +299,7 @@ def extract_metrics(
         deward_pct=deward_pct_val,
         stun_time=stun_time_val,
         rune_control_pct=rune_control_pct_val,
+        tower_damage=tower_damage_val,
         turbo=match_meta.get("game_mode") == 23,
     )
 

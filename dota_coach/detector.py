@@ -209,6 +209,21 @@ def detect_errors(
             threshold="< 20% rune control is below mid expectations",
         ))
 
+    # Tower damage rule (pos 2): low building damage for mid
+    if (
+        role_profile is not None
+        and "tower_damage" in role_profile.observed_metrics
+        and metrics.tower_damage is not None
+        and metrics.tower_damage < 1500
+    ):
+        errors.append(DetectedError(
+            category="Low tower damage",
+            description="Dealt very little damage to buildings — mid should pressure towers",
+            severity="medium",
+            metric_value=f"{metrics.tower_damage} building damage",
+            threshold="< 1500 tower damage is low for a mid hero",
+        ))
+
     # ===================================================================
     # v1 ABSOLUTE RULES (only when no enrichment provided — backward compat)
     # ===================================================================
