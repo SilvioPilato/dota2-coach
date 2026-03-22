@@ -64,6 +64,7 @@ class MatchMetrics(BaseModel):
     hero_healing: Optional[int] = None
     deward_pct: Optional[float] = None
     stun_time: Optional[float] = None
+    rune_control_pct: Optional[float] = None
 
     # Game mode
     turbo: bool = False

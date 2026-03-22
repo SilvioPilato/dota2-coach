@@ -160,6 +160,8 @@ def build_user_message(
             delta_20 = metrics.net_worth_at_20 - metrics.enemy_carry_net_worth_at_20
             lines.append(f"- Net worth delta at 10: {delta_10:+d}g vs opposing pos 1")
             lines.append(f"- Net worth delta at 20: {delta_20:+d}g vs opposing pos 1")
+        if role == 2 and metrics.rune_control_pct is not None:
+            lines.append(f"- Rune control: {metrics.rune_control_pct:.0%} of runes collected")
 
     elif role == 3:
         # Pos 3: GPM, LH, stacks, stun time

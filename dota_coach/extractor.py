@@ -239,6 +239,14 @@ def extract_metrics(
     # stun_time: total stun duration (seconds) applied to enemies, from match_meta
     stun_time_val: float | None = our_meta.get("stuns")
 
+    # rune_control_pct: fraction of all picked runes that our player collected
+    # Uses parser "rune" records (type=rune, slot=parser slot of picker)
+    all_rune_picks = [r for r in records if r.get("type") == "rune"]
+    our_rune_picks = [r for r in all_rune_picks if r.get("slot") == our_parser_slot]
+    rune_control_pct_val: float | None = (
+        len(our_rune_picks) / len(all_rune_picks) if all_rune_picks else None
+    )
+
     # deward_pct: fraction of enemy wards killed by our player
     # obs/sen records track ward placements; obs_left/sen_left track ward deaths
     # We count enemy ward placements (slot != our_parser_slot) and compare to
@@ -287,6 +295,7 @@ def extract_metrics(
         hero_healing=hero_healing_val,
         deward_pct=deward_pct_val,
         stun_time=stun_time_val,
+        rune_control_pct=rune_control_pct_val,
         turbo=match_meta.get("game_mode") == 23,
     )
 

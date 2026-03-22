@@ -194,6 +194,21 @@ def detect_errors(
             threshold="< 10s stun time is underutilizing CC for this role",
         ))
 
+    # Rune control rule (pos 2): low rune pickup percentage
+    if (
+        role_profile is not None
+        and "rune_control_pct" in role_profile.observed_metrics
+        and metrics.rune_control_pct is not None
+        and metrics.rune_control_pct < 0.20
+    ):
+        errors.append(DetectedError(
+            category="Low rune control",
+            description="Picked up fewer than 20% of all runes — mid lane rune control is poor",
+            severity="medium",
+            metric_value=f"{metrics.rune_control_pct:.0%} of runes collected",
+            threshold="< 20% rune control is below mid expectations",
+        ))
+
     # ===================================================================
     # v1 ABSOLUTE RULES (only when no enrichment provided — backward compat)
     # ===================================================================
