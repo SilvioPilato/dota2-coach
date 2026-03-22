@@ -327,7 +327,7 @@ function renderMistakes(report, errors) {
 function parseMistakeBlocks(text) {
   if (!text) return [];
   const blocks = [];
-  const regex = /MISTAKE\s+\d+\s*\((\w+)\)\s*:\s*(.+?)(?:\n→\s*Fix:\s*(.+?))?(?=\nMISTAKE|\nPRIORITY|$)/gis;
+  const regex = /MISTAKE\s+\d+\s*\((\w+)\)\s*:\s*(.+?)(?:\n→\s*Fix:\s*(.+?))?(?=\nMISTAKE|\nPRIORITY|\n---|$)/gis;
   let m;
   while ((m = regex.exec(text)) !== null) {
     blocks.push({

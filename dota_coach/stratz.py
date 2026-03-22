@@ -43,6 +43,7 @@ async def get_match_positions(match_id: int) -> dict[int, int] | None:
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
+                    "User-Agent": "STRATZ_API",
                 },
             )
             response.raise_for_status()
