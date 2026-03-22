@@ -236,6 +236,9 @@ def extract_metrics(
     # hero_healing: from match_meta players[] entry
     hero_healing_val: int | None = our_meta.get("hero_healing")
 
+    # stun_time: total stun duration (seconds) applied to enemies, from match_meta
+    stun_time_val: float | None = our_meta.get("stuns")
+
     # deward_pct: fraction of enemy wards killed by our player
     # obs/sen records track ward placements; obs_left/sen_left track ward deaths
     # We count enemy ward placements (slot != our_parser_slot) and compare to
@@ -283,6 +286,7 @@ def extract_metrics(
         stacks_created=stacks_created_val,
         hero_healing=hero_healing_val,
         deward_pct=deward_pct_val,
+        stun_time=stun_time_val,
         turbo=match_meta.get("game_mode") == 23,
     )
 

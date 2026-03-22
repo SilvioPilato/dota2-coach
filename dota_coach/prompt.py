@@ -169,9 +169,11 @@ def build_user_message(
         lines.append(f"- LH at 10 min: {metrics.lh_at_10}")
         stacks = metrics.stacks_created if metrics.stacks_created is not None else 0
         lines.append(f"- Stacks created: {stacks}")
+        if metrics.stun_time is not None:
+            lines.append(f"- Stun time applied: {metrics.stun_time:.1f}s")
 
     elif role in (4, 5):
-        # Pos 4/5: ward placements, deward_pct, stacks, hero healing
+        # Pos 4/5: ward placements, deward_pct, stacks, hero healing, stun time
         wp = metrics.ward_placements if metrics.ward_placements is not None else 0
         lines.append(f"- Ward placements: {wp}")
         if metrics.deward_pct is not None:
@@ -180,6 +182,8 @@ def build_user_message(
         lines.append(f"- Stacks created: {stacks}")
         healing = metrics.hero_healing if metrics.hero_healing is not None else 0
         lines.append(f"- Hero healing: {healing}")
+        if metrics.stun_time is not None:
+            lines.append(f"- Stun time applied: {metrics.stun_time:.1f}s")
 
     lines.append("")
 

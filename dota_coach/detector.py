@@ -179,6 +179,21 @@ def detect_errors(
             threshold="< 30% deward rate is below expectations for a support",
         ))
 
+    # Stun time rule (pos 3/4/5): low total stun application
+    if (
+        role_profile is not None
+        and "stun_time" in role_profile.observed_metrics
+        and metrics.stun_time is not None
+        and metrics.stun_time < 10.0
+    ):
+        errors.append(DetectedError(
+            category="Low stun time",
+            description="Applied very little crowd control — hero stun abilities may be underused",
+            severity="medium",
+            metric_value=f"{metrics.stun_time:.1f}s total stun applied",
+            threshold="< 10s stun time is underutilizing CC for this role",
+        ))
+
     # ===================================================================
     # v1 ABSOLUTE RULES (only when no enrichment provided — backward compat)
     # ===================================================================

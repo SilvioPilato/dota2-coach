@@ -63,6 +63,7 @@ class MatchMetrics(BaseModel):
     stacks_created: Optional[int] = None
     hero_healing: Optional[int] = None
     deward_pct: Optional[float] = None
+    stun_time: Optional[float] = None
 
     # Game mode
     turbo: bool = False
