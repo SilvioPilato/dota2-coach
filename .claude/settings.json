@@ -26,7 +26,12 @@
       "Bash(dolt -r .beads/dolt remote -v)",
       "Bash(dolt remote:*)",
       "Bash(bd stats:*)",
-      "Bash(bd epic:*)"
+      "Bash(bd epic:*)",
+      "Bash(tasklist)",
+      "Bash(wmic process:*)",
+      "Bash(tasklist /v)",
+      "Skill(beads:beads)",
+      "Skill(beads:beads:*)"
     ]
   }
 }
