@@ -304,6 +304,101 @@ def extract_metrics(
     )
 
 
+def extract_metrics_from_opendota(
+    our_account_id: int,
+    match_meta: dict,
+) -> MatchMetrics:
+    """Degraded fallback: build MatchMetrics from OpenDota match_meta only.
+
+    Used when the Valve CDN replay has expired. The following fields are
+    unavailable and are set to safe defaults/None:
+      - deaths_before_10 (set to 0)
+      - death_timestamps_laning (set to [])
+      - first_core_item_minute / first_core_item_name (set to None)
+      - laning_heatmap_own_half_pct (set to 0.5 — neutral)
+      - teamfight_participation_rate derived from interval records (set to None)
+    """
+    our_meta = next(
+        (p for p in match_meta["players"] if p.get("account_id") == our_account_id),
+        None,
+    )
+    if our_meta is None:
+        raise ValueError(f"account_id {our_account_id} not found in match players")
+
+    our_unit = our_meta.get("hero_id", "Unknown")
+    our_hero_name = our_meta.get("hero", {}).get("localized_name", "") or our_meta.get("hero_id", "Unknown")
+    # OpenDota players[] include personaname, hero info may be nested; use a robust fallback
+    # Try common field shapes from OpenDota API
+    if not our_hero_name or our_hero_name == "Unknown":
+        our_hero_name = str(our_unit)
+
+    duration_seconds = match_meta.get("duration", 0)
+    duration_minutes = duration_seconds / 60.0
+
+    gpm = our_meta.get("gold_per_min", 0)
+    xpm = our_meta.get("xp_per_min", 0)
+    total_last_hits = our_meta.get("last_hits", 0)
+
+    # Extract net worth and LH at 10 from time-series arrays
+    gold_t: list[int] = our_meta.get("gold_t") or []
+    lh_t: list[int] = our_meta.get("lh_t") or []
+    net_worth_at_10 = gold_t[10] if len(gold_t) > 10 else 0
+    lh_at_10 = lh_t[10] if len(lh_t) > 10 else 0
+
+    # Enemy carry net worth: find opposing pos 1
+    our_is_radiant = our_meta.get("isRadiant", True)
+    enemy_meta = next(
+        (
+            p for p in match_meta["players"]
+            if p.get("account_id") != our_account_id
+            and p.get("isRadiant") != our_is_radiant
+            and p.get("lane_role") == 1
+        ),
+        None,
+    )
+    enemy_gold_t: list[int] = (enemy_meta or {}).get("gold_t") or []
+    enemy_nw_at_10 = enemy_gold_t[10] if len(enemy_gold_t) > 10 else 0
+    net_worth_at_20 = gold_t[20] if len(gold_t) > 20 else 0
+    enemy_nw_at_20 = enemy_gold_t[20] if len(enemy_gold_t) > 20 else 0
+
+    result = "win" if our_meta.get("win") else "loss"
+    denies_at_10 = 0  # not available per-minute from match_meta
+
+    return MatchMetrics(
+        match_id=match_meta["match_id"],
+        hero=our_hero_name,
+        duration_minutes=duration_minutes,
+        result=result,
+        lh_at_10=lh_at_10,
+        denies_at_10=denies_at_10,
+        deaths_before_10=0,          # unavailable in degraded mode
+        death_timestamps_laning=[],  # unavailable in degraded mode
+        net_worth_at_10=net_worth_at_10,
+        enemy_carry_net_worth_at_10=enemy_nw_at_10,
+        net_worth_at_20=net_worth_at_20,
+        enemy_carry_net_worth_at_20=enemy_nw_at_20,
+        gpm=gpm,
+        xpm=xpm,
+        total_last_hits=total_last_hits,
+        first_core_item_minute=None,          # unavailable in degraded mode
+        first_core_item_name=None,            # unavailable in degraded mode
+        laning_heatmap_own_half_pct=0.5,     # unavailable — neutral default
+        ward_purchases=our_meta.get("purchase_ward_observer", 0) or 0,
+        teamfight_participation_rate=None,    # unavailable in degraded mode
+        teamfight_avg_damage_contribution=None,
+        first_roshan_minute=None,
+        first_tower_minute=None,
+        ward_placements=(
+            (our_meta.get("obs_placed") or 0) + (our_meta.get("sen_placed") or 0) or None
+        ),
+        stacks_created=our_meta.get("camps_stacked"),
+        hero_healing=our_meta.get("hero_healing"),
+        stun_time=our_meta.get("stuns"),
+        tower_damage=our_meta.get("tower_damage"),
+        turbo=match_meta.get("game_mode") == 23,
+    )
+
+
 def build_timeline(records: list[dict], our_npc_name: str, hero_display: str = "") -> str:
     """Build a compact chronological event log for chat system prompt.
 

@@ -238,6 +238,18 @@ function renderReport(d) {
   turboEl.textContent = d.turbo ? '⚡ TURBO' : '';
   turboEl.style.display = d.turbo ? '' : 'none';
 
+  // Degraded mode banner
+  let degradedBanner = document.getElementById('degradedBanner');
+  if (!degradedBanner) {
+    degradedBanner = document.createElement('div');
+    degradedBanner.id = 'degradedBanner';
+    degradedBanner.className = 'degraded-banner';
+    degradedBanner.textContent = '⚠ Replay unavailable — analysis is based on OpenDota data only. ' +
+      'Some metrics (deaths before 10, CS heatmap, item timings) are not available in this mode.';
+    document.getElementById('report').insertBefore(degradedBanner, document.getElementById('report').firstChild);
+  }
+  degradedBanner.style.display = d.degraded ? '' : 'none';
+
   // Metric cards
   const cards = ROLE_CARDS[d.role] || ROLE_CARDS[1];
   const mc = document.getElementById('metricCards');

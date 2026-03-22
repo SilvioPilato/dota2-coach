@@ -116,6 +116,7 @@ class MatchReport(BaseModel):
     duration_minutes: float
     patch: str = ""
     turbo: bool = False
+    degraded: bool = False
     metrics: MatchMetrics
     benchmarks: list[HeroBenchmark] = []
     errors: list[DetectedError] = []

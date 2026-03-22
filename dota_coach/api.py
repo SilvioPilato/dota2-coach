@@ -136,23 +136,30 @@ async def analyze(req: AnalyzeRequest):
     try:
         async with download_and_decompress(replay_url, match_id_int, force_redownload=req.force_redownload) as dem_path:
             records = parse_replay(dem_path)
-    except ReplayExpiredError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    except ReplayExpiredError:
+        # Replay expired — fall back to OpenDota-only metrics (degraded mode)
+        from dota_coach.extractor import extract_metrics_from_opendota
+        try:
+            metrics = extract_metrics_from_opendota(account_id, match_meta)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Degraded extraction failed: {exc}")
+        degraded = True
+        timeline = ""
+    else:
+        degraded = False
+        # 6. Extract metrics
+        try:
+            metrics = extract_metrics(records, account_id, match_meta)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Extraction failed: {exc}")
 
-    # 6. Extract metrics
-    try:
-        metrics = extract_metrics(records, account_id, match_meta)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Extraction failed: {exc}")
-
-    # 7. Build timeline for chat context
-    # Determine our npc name for timeline
-    our_meta = next(
-        (p for p in match_meta["players"] if p.get("account_id") == account_id),
-        None,
-    )
-    our_npc = f"npc_dota_hero_{metrics.hero.lower()}" if our_meta else ""
-    timeline = build_timeline(records, our_npc, metrics.hero)
+        # 7. Build timeline for chat context
+        our_meta = next(
+            (p for p in match_meta["players"] if p.get("account_id") == account_id),
+            None,
+        )
+        our_npc = f"npc_dota_hero_{metrics.hero.lower()}" if our_meta else ""
+        timeline = build_timeline(records, our_npc, metrics.hero)
 
     # 8. Enrich with benchmarks + patch data
     enrichment = await enrich(metrics, match_meta)
@@ -187,6 +194,7 @@ async def analyze(req: AnalyzeRequest):
         duration_minutes=metrics.duration_minutes,
         patch=enrichment.patch_name,
         turbo=metrics.turbo,
+        degraded=degraded,
         metrics=metrics,
         benchmarks=enrichment.benchmarks,
         errors=errors,
