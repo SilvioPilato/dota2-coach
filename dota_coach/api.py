@@ -205,7 +205,24 @@ async def analyze(req: AnalyzeRequest):
 
     report_dict = report.model_dump()
     write_analysis_cache(match_id_int, account_id, role, report_dict)
+
+    # Persist to SQLite match history (v3 feature — silent on failure)
+    from dota_coach.history import save_match_report
+    save_match_report(match_id_int, account_id, role, report_dict)
+
     return JSONResponse(content=report_dict)
+
+
+# ---------------------------------------------------------------------------
+# GET /history/{account_id}
+# ---------------------------------------------------------------------------
+
+@app.get("/history/{account_id}")
+async def match_history(account_id: int, limit: int = 20):
+    """Return stored match history for an account (newest first)."""
+    from dota_coach.history import get_match_history
+    records = get_match_history(account_id, limit=limit)
+    return JSONResponse(content=records)
 
 
 # ---------------------------------------------------------------------------
