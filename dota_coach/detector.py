@@ -13,25 +13,40 @@ from dota_coach.models import (
 )
 
 CORE_ITEMS: frozenset[str] = frozenset({
-    "item_battle_fury",
-    "item_manta",
-    "item_black_king_bar",
+    # Farming / tempo items
+    "item_bfury",           # Battle Fury (parser name — NOT item_battle_fury)
+    "item_hand_of_midas",
+    "item_radiance",
     "item_maelstrom",
     "item_mjollnir",
+    "item_echo_sabre",
+    # Fighting / right-click items
     "item_desolator",
+    "item_basher",
+    "item_abyssal_blade",
+    "item_monkey_king_bar",
+    "item_greater_crit",    # Daedalus
     "item_butterfly",
-    "item_greater_crit",
+    "item_silver_edge",
+    "item_invis_sword",     # Shadow Blade
+    # Survivability
+    "item_black_king_bar",
     "item_skadi",
+    "item_heart",
+    "item_satanic",
+    "item_armlet",
+    # Mobility
+    "item_blink",
+    "item_manta",
     "item_sange_and_yasha",
     "item_yasha",
-    "item_monkey_king_bar",
-    "item_hand_of_midas",
-    "item_ancient_janggo",
-    "item_ultimate_scepter",
+    # Utility / other common firsts
     "item_diffusal_blade",
-    "item_radiance",
-    "item_armlet",
+    "item_disperser",       # Upgraded Diffusal
+    "item_ultimate_scepter",
+    "item_kaya",
     "item_helm_of_the_dominator",
+    "item_helm_of_the_overlord",
 })
 
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2}

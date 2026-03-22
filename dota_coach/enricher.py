@@ -162,13 +162,9 @@ async def enrich(
             "gold_per_min": metrics.gpm,
             "xp_per_min": metrics.xpm,
         }
-        # last_hits_per_min derived from final lh / duration
-        if metrics.duration_minutes > 0:
-            metric_map["last_hits_per_min"] = (
-                metrics.lh_at_10 * 10 / min(metrics.duration_minutes, 10)
-                if metrics.duration_minutes >= 10
-                else metrics.lh_at_10 / max(metrics.duration_minutes, 1)
-            )
+        # last_hits_per_min: total game LH / duration (matches OpenDota's benchmark definition)
+        if metrics.duration_minutes > 0 and metrics.total_last_hits > 0:
+            metric_map["last_hits_per_min"] = metrics.total_last_hits / metrics.duration_minutes
 
         for bench_key, player_val in metric_map.items():
             if bench_key in bench_result:

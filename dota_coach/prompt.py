@@ -146,22 +146,27 @@ def build_user_message(
     if role in (1, 2):
         # Pos 1/2: GPM, LH, first core, NW deltas
         lines.append(_benchmark_line(benchmarks, "gold_per_min", "GPM", metrics.gpm))
-        lines.append(_benchmark_line(benchmarks, "last_hits_per_min", "LH at 10 min", metrics.lh_at_10))
+        lh_per_min = metrics.total_last_hits / metrics.duration_minutes if metrics.duration_minutes > 0 else 0
+        lines.append(_benchmark_line(benchmarks, "last_hits_per_min", "LH/min (total game)", lh_per_min))
+        lines.append(f"- LH at 10 min: {metrics.lh_at_10}")
         core_str = (
             f"{metrics.first_core_item_name} at {metrics.first_core_item_minute:.1f} min"
             if metrics.first_core_item_minute is not None
             else "None purchased"
         )
         lines.append(f"- First core: {core_str}")
-        delta_10 = metrics.net_worth_at_10 - metrics.enemy_carry_net_worth_at_10
-        delta_20 = metrics.net_worth_at_20 - metrics.enemy_carry_net_worth_at_20
-        lines.append(f"- Net worth delta at 10: {delta_10:+d}g vs opposing pos 1")
-        lines.append(f"- Net worth delta at 20: {delta_20:+d}g vs opposing pos 1")
+        if metrics.enemy_carry_net_worth_at_10 > 0:
+            delta_10 = metrics.net_worth_at_10 - metrics.enemy_carry_net_worth_at_10
+            delta_20 = metrics.net_worth_at_20 - metrics.enemy_carry_net_worth_at_20
+            lines.append(f"- Net worth delta at 10: {delta_10:+d}g vs opposing pos 1")
+            lines.append(f"- Net worth delta at 20: {delta_20:+d}g vs opposing pos 1")
 
     elif role == 3:
         # Pos 3: GPM, LH, stacks, stun time
         lines.append(_benchmark_line(benchmarks, "gold_per_min", "GPM", metrics.gpm))
-        lines.append(_benchmark_line(benchmarks, "last_hits_per_min", "LH at 10 min", metrics.lh_at_10))
+        lh_per_min = metrics.total_last_hits / metrics.duration_minutes if metrics.duration_minutes > 0 else 0
+        lines.append(_benchmark_line(benchmarks, "last_hits_per_min", "LH/min (total game)", lh_per_min))
+        lines.append(f"- LH at 10 min: {metrics.lh_at_10}")
         stacks = metrics.stacks_created if metrics.stacks_created is not None else 0
         lines.append(f"- Stacks created: {stacks}")
 

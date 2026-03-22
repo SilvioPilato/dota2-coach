@@ -42,6 +42,7 @@ class MatchMetrics(BaseModel):
     # Farming
     gpm: int
     xpm: int
+    total_last_hits: int = 0
     first_core_item_minute: Optional[float]
     first_core_item_name: Optional[str]
 

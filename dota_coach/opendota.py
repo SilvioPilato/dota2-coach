@@ -65,6 +65,36 @@ def identify_enemy_carry(match: dict, our_account_id: int) -> dict | None:
     )
 
 
+async def request_parse_and_wait(match_id: int, timeout: int = 90, interval: int = 5) -> str:
+    """Trigger an OpenDota parse for match_id and poll until replay_url is available.
+
+    Returns the replay URL once ready.
+    Raises TimeoutError if the match isn't processed within `timeout` seconds.
+    """
+    import asyncio
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        await client.post(f"{BASE_URL}/request/{match_id}")
+
+    elapsed = 0
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        while elapsed < timeout:
+            await asyncio.sleep(interval)
+            elapsed += interval
+            resp = await client.get(f"{BASE_URL}/matches/{match_id}")
+            resp.raise_for_status()
+            data = resp.json()
+            replay_url = data.get("replay_url")
+            if replay_url:
+                return replay_url
+            cluster = data.get("cluster")
+            salt = data.get("replay_salt")
+            if cluster and salt:
+                return f"http://replay{cluster}.valve.net/570/{match_id}_{salt}.dem.bz2"
+
+    raise TimeoutError(f"OpenDota did not process match {match_id} within {timeout}s")
+
+
 async def get_benchmarks(hero_id: int) -> dict:
     """GET /benchmarks?hero_id={hero_id} — returns percentile benchmark data for a hero."""
     async with httpx.AsyncClient(timeout=30.0) as client:

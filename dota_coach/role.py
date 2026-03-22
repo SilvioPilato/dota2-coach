@@ -66,46 +66,63 @@ ROLE_PROFILES: dict[int, RoleProfile] = {
 def detect_role(match_meta: dict, account_id: int) -> int:
     """Detect the player's role (1-5) from OpenDota match metadata.
 
-    Uses the lane_role field from the player's entry in match_meta['players'].
+    Uses relative GPM ranking within the same team and lane_role group to
+    distinguish pos 1 vs pos 5 (both lane_role=1) and pos 3 vs pos 4 (both
+    lane_role=3). This avoids absolute LH/GPM thresholds that break for turbo
+    games and long matches.
+
     lane_role values: 1=safe lane, 2=mid, 3=off lane, 4=jungle.
-    Maps to position: safe lane + core → pos 1, mid → pos 2, offlane → pos 3.
-    Supports 4/5 map lane_role=4 (jungle) for roaming supports.
 
     Raises ValueError if account_id not found or lane_role is missing/invalid.
     """
-    player = next(
-        (p for p in match_meta.get("players", []) if p.get("account_id") == account_id),
-        None,
-    )
+    players = match_meta.get("players", [])
+    player = next((p for p in players if p.get("account_id") == account_id), None)
     if player is None:
         raise ValueError(f"account_id {account_id} not found in match players")
 
     lane_role = player.get("lane_role")
     if lane_role is None:
-        raise ValueError(f"lane_role not available for account_id {account_id}")
+        # Turbo and unprocessed matches lack lane_role — fall back to absolute stats
+        lh = player.get("last_hits", 0)
+        gpm = player.get("gold_per_min", 0)
+        if lh > 100 and gpm > 450:
+            return 2  # mid
+        elif lh > 60:
+            return 1  # carry
+        elif gpm > 350:
+            return 3  # offlaner
+        else:
+            return 5  # support fallback
 
-    # OpenDota lane_role mapping:
-    # 1 = safe lane → pos 1 (carry) or pos 5 (hard support) depending on is_roaming
-    # 2 = mid       → pos 2
-    # 3 = off lane  → pos 3 (offlaner) or pos 4 (soft support)
-    # 4 = jungle    → pos 4 (soft support / roamer)
-    #
-    # Heuristic: use lane_role directly for pos 1-3.
-    # For supports, check if player is a core or support via gold_per_min or last_hits.
-    # Simplified: lane_role 1 with low GPM → pos 5, lane_role 3 with low GPM → pos 4.
+    if lane_role == 2:
+        return 2
+    if lane_role == 4:
+        return 4
 
-    is_core = player.get("lane_role") in (1, 2, 3) and (player.get("last_hits", 0) > 50)
+    # is_roaming=True means OpenDota explicitly flagged this player as a roamer → pos 4
+    if player.get("is_roaming"):
+        return 4
+
+    # For lane_role 1 and 3, multiple teammates share the same lane.
+    # Rank by GPM within the same team + lane_role group:
+    #   lane_role=1: highest GPM → pos 1 (carry), rest → pos 5 (hard support)
+    #   lane_role=3: highest GPM → pos 3 (offlaner), rest → pos 4 (soft support)
+    our_team_radiant = player.get("isRadiant")
+    same_lane_group = [
+        p for p in players
+        if p.get("isRadiant") == our_team_radiant
+        and p.get("lane_role") == lane_role
+        and not p.get("is_roaming")
+    ]
+    same_lane_group.sort(key=lambda p: p.get("gold_per_min", 0), reverse=True)
+    is_highest_gpm = same_lane_group[0].get("account_id") == account_id
 
     if lane_role == 1:
-        return 1 if is_core else 5
-    elif lane_role == 2:
-        return 2
-    elif lane_role == 3:
-        return 3 if is_core else 4
-    elif lane_role == 4:
-        return 4
-    else:
-        raise ValueError(f"Unknown lane_role {lane_role} for account_id {account_id}")
+        return 1 if is_highest_gpm else 5
+    if lane_role == 3:
+        return 3 if is_highest_gpm else 4
+
+    raise ValueError(f"Unknown lane_role {lane_role} for account_id {account_id}")
 
 
 def get_role_profile(role: int) -> RoleProfile:

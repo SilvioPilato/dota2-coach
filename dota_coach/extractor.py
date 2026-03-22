@@ -142,10 +142,11 @@ def extract_metrics(
 
     duration_minutes = duration_seconds / 60.0
 
-    final_nw = iv_our_final["networth"] if iv_our_final else 0
-    final_xp = iv_our_final["xp"] if iv_our_final else 0
-    gpm = int(final_nw / duration_minutes) if duration_minutes > 0 else 0
-    xpm = int(final_xp / duration_minutes) if duration_minutes > 0 else 0
+    # Use OpenDota's authoritative gold_per_min / xp_per_min from match metadata.
+    # These are gold *earned* / time and XP / time — not derivable from replay networth
+    # (networth = current wealth, not income; diverges from GPM for long games).
+    gpm = our_meta.get("gold_per_min", 0)
+    xpm = our_meta.get("xp_per_min", 0)
 
     # --- Step 5: result ---
     if game_winner is not None:
@@ -235,6 +236,8 @@ def extract_metrics(
     # hero_healing: from match_meta players[] entry
     hero_healing_val: int | None = our_meta.get("hero_healing")
 
+    total_last_hits = our_meta.get("last_hits", 0)
+
     return MatchMetrics(
         match_id=match_meta["match_id"],
         hero=our_hero_name,
@@ -250,6 +253,7 @@ def extract_metrics(
         enemy_carry_net_worth_at_20=enemy_nw_at_20,
         gpm=gpm,
         xpm=xpm,
+        total_last_hits=total_last_hits,
         first_core_item_minute=first_core_item_minute,
         first_core_item_name=first_core_item_name,
         laning_heatmap_own_half_pct=laning_heatmap_own_half_pct,

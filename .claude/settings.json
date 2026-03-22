@@ -4,7 +4,9 @@
       "Bash(python -c \":*)",
       "Bash(python -m pytest tests/test_extractor.py -v)",
       "Bash(python -m pytest tests/test_prompt.py -v)",
-      "Bash(python -m pytest tests/ -v)"
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(bd update dota-analysis-xus --description \"OpenDota does not expose player positions \\(1-5\\) directly — only lane_role \\(1-4, the lane played\\) and is_roaming. Stratz provides a direct \\\\`position\\\\` field \\(POSITION_1 through POSITION_5\\) via its GraphQL API.:*)",
+      "Bash(bd dep:*)"
     ]
   }
 }
