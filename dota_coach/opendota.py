@@ -1,0 +1,65 @@
+"""
+OpenDota API client (async, httpx).
+
+Rate limit: 60 req/min unauthenticated. Single-match runs make ≤2 calls — no throttling needed.
+v2 batch mode: add asyncio.Semaphore(1) + 1s delay between requests.
+"""
+import httpx
+
+BASE_URL = "https://api.opendota.com/api"
+
+# 64-bit Steam ID offset
+_STEAM_ID_OFFSET = 76561197960265728
+
+
+def extract_account_id(steam_id_64: int) -> int:
+    """Convert 64-bit Steam ID to 32-bit OpenDota account_id."""
+    return steam_id_64 - _STEAM_ID_OFFSET
+
+
+async def get_match(match_id: int) -> dict:
+    """GET /matches/{match_id} — returns full match JSON including replay_url and players[]."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{BASE_URL}/matches/{match_id}")
+        response.raise_for_status()
+        return response.json()
+
+
+async def get_recent_matches(account_id: int, limit: int = 10) -> list[dict]:
+    """GET /players/{account_id}/recentMatches — returns list of recent match summaries."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"{BASE_URL}/players/{account_id}/recentMatches",
+            params={"limit": limit},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def identify_enemy_carry(match: dict, our_account_id: int) -> dict | None:
+    """
+    Find the enemy safe-lane player (lane_role == 1) on the opposing team.
+
+    Known limitation: some carries play offlane or mid. For v1, lane_role == 1
+    on the opposing team is used as the carry heuristic.
+
+    Returns the player dict from match['players'], or None if not found.
+    """
+    our_player = next(
+        (p for p in match["players"] if p.get("account_id") == our_account_id),
+        None,
+    )
+    if our_player is None:
+        return None
+
+    our_team = "radiant" if our_player.get("isRadiant") else "dire"
+    enemy_team_flag = not our_player.get("isRadiant")
+
+    return next(
+        (
+            p
+            for p in match["players"]
+            if p.get("isRadiant") == enemy_team_flag and p.get("lane_role") == 1
+        ),
+        None,
+    )

@@ -1,0 +1,2 @@
+[console_scripts]
+dota-coach = dota_coach.cli:main
