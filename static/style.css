@@ -1,0 +1,104 @@
+/* Dota 2 Personal Coach — Dark Theme */
+:root {
+  --bg: #1a1a2e;
+  --bg-card: #16213e;
+  --bg-input: #0f3460;
+  --accent: #e94560;
+  --accent-blue: #4da8da;
+  --text: #eee;
+  --text-muted: #8a8a9a;
+  --win: #4caf50;
+  --loss: #e94560;
+  --border: #2a2a4a;
+  --radius: 8px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+a { color: var(--accent-blue); }
+
+/* Input bar */
+.input-bar { display: flex; gap: 10px; max-width: 800px; margin: 40px auto 30px; padding: 0 20px; }
+.input-bar input { flex: 1; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); color: var(--text); font-size: 15px; outline: none; }
+.input-bar input:focus { border-color: var(--accent-blue); }
+.input-bar input::placeholder { color: var(--text-muted); }
+.input-bar button { padding: 12px 28px; border: none; border-radius: var(--radius); background: var(--accent); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.input-bar button:hover { opacity: .9; }
+.input-bar button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Spinner */
+.spinner { text-align: center; padding: 60px 0; color: var(--text-muted); font-size: 16px; display: none; }
+.spinner.visible { display: block; }
+.spinner::before { content: ''; display: block; width: 36px; height: 36px; margin: 0 auto 14px; border: 3px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Error banner */
+.error-banner { max-width: 800px; margin: 0 auto 20px; padding: 14px 20px; background: #3a1424; border: 1px solid var(--loss); border-radius: var(--radius); color: var(--loss); display: none; }
+.error-banner.visible { display: block; }
+
+/* Report wrapper */
+.report { max-width: 900px; margin: 0 auto; padding: 0 20px 60px; display: none; }
+.report.visible { display: block; }
+
+/* Match header */
+.match-header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 24px; }
+.hero-name { font-size: 26px; font-weight: 700; }
+.badge { padding: 4px 12px; border-radius: 4px; font-size: 13px; font-weight: 600; text-transform: uppercase; }
+.badge-role { background: var(--bg-input); color: var(--accent-blue); }
+.badge-win { background: var(--win); color: #fff; }
+.badge-loss { background: var(--loss); color: #fff; }
+.badge-patch { background: var(--border); color: var(--text-muted); font-size: 12px; }
+.badge-turbo { background: #e07c24; color: #fff; font-size: 12px; }
+.turbo-notice { padding: 12px; color: #e07c24; font-size: 14px; line-height: 1.6; }
+.role-override { margin-left: auto; }
+.role-override select { padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); font-size: 13px; }
+
+/* Metric cards */
+.metric-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 28px; }
+.metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; text-align: center; }
+.metric-card .label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px; }
+.metric-card .value { font-size: 28px; font-weight: 700; }
+
+/* Two-column layout */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 28px; }
+@media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+.panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.panel h3 { font-size: 15px; margin-bottom: 14px; color: var(--accent-blue); }
+.stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.stat-row:last-child { border-bottom: none; }
+
+/* Benchmark bars */
+.bench-row { margin-bottom: 12px; }
+.bench-row .bench-label { font-size: 13px; margin-bottom: 4px; display: flex; justify-content: space-between; }
+.bench-bar { height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; }
+.bench-fill { height: 100%; border-radius: 5px; background: var(--accent-blue); transition: width .4s; }
+
+/* Coaching report — mistake blocks */
+.mistake-block { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 14px; }
+.mistake-block .sev { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-right: 8px; }
+.sev-critical { background: var(--loss); color: #fff; }
+.sev-high { background: #e07c24; color: #fff; }
+.sev-medium { background: #b8860b; color: #fff; }
+.mistake-block .desc { margin: 8px 0 4px; }
+.mistake-block .fix { color: var(--accent-blue); font-size: 14px; }
+
+/* Priority focus */
+.priority-focus { background: #0d2137; border: 2px solid var(--accent-blue); border-radius: var(--radius); padding: 18px 22px; margin-top: 20px; }
+.priority-focus h3 { color: var(--accent-blue); margin-bottom: 8px; font-size: 16px; }
+
+/* Section titles */
+.section-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+
+/* Chat panel */
+.chat-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.chat-messages { max-height: 400px; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.chat-bubble { max-width: 80%; padding: 10px 14px; border-radius: var(--radius); font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
+.chat-user { align-self: flex-end; background: var(--bg-input); color: var(--text); }
+.chat-assistant { align-self: flex-start; background: var(--border); color: var(--text); }
+.chat-streaming { opacity: .7; }
+.chat-input-bar { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.chat-input-bar input { flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); color: var(--text); font-size: 14px; outline: none; }
+.chat-input-bar input:focus { border-color: var(--accent-blue); }
+.chat-input-bar input::placeholder { color: var(--text-muted); }
+.chat-input-bar button { padding: 10px 22px; border: none; border-radius: var(--radius); background: var(--accent-blue); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+.chat-input-bar button:hover { opacity: .9; }
+.chat-input-bar button:disabled { opacity: .5; cursor: not-allowed; }

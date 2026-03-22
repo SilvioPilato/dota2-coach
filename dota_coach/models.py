@@ -57,6 +57,39 @@ class MatchMetrics(BaseModel):
     first_roshan_minute: Optional[float]
     first_tower_minute: Optional[float]
 
+    # All-role fields (v2) — None when source data absent
+    ward_placements: Optional[int] = None
+    stacks_created: Optional[int] = None
+    hero_healing: Optional[int] = None
+
+    # Game mode
+    turbo: bool = False
+
+
+class RoleProfile(BaseModel):
+    """Per-role configuration for metric observation and detection rules."""
+    observed_metrics: list[str]
+    death_limit_before_10: int
+    tf_participation_limit: float
+    ward_rule: Literal["flag_if_laning_phase", "none", "require_minimum"]
+
+
+class HeroBenchmark(BaseModel):
+    """A single benchmark metric from OpenDota /benchmarks."""
+    metric: str              # e.g. "gold_per_min"
+    player_value: float
+    player_pct: float        # 0.0–1.0 percentile
+    bracket_avg: float       # value at ~50th percentile
+
+
+class EnrichmentContext(BaseModel):
+    """External context injected into prompts by the enricher."""
+    patch_name: str
+    benchmarks: list[HeroBenchmark]
+    item_costs: dict[str, int]           # item_name → gold cost
+    hero_base_stats: dict[str, float]    # base_damage, base_armor, etc.
+    bracket_source: str = "global"       # reserved for v3 bracket-filtered
+
 
 class DetectedError(BaseModel):
     category: str
@@ -64,3 +97,34 @@ class DetectedError(BaseModel):
     severity: Literal["critical", "high", "medium"]
     metric_value: str
     threshold: str
+    player_pct: Optional[float] = None   # percentile (0–1), None for non-pct rules
+    context: Optional[str] = None        # e.g. "global median for AM is 48 LH"
+
+
+class MatchReport(BaseModel):
+    """Full /analyze response shape — held by the browser for chat context."""
+    match_id: int
+    hero: str
+    role: int
+    role_label: str
+    result: str
+    duration_minutes: float
+    patch: str = ""
+    turbo: bool = False
+    metrics: MatchMetrics
+    benchmarks: list[HeroBenchmark] = []
+    errors: list[DetectedError] = []
+    coaching_report: str = ""
+    priority_focus: str = ""
+    timeline: str = ""
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    match_context: MatchReport
+    history: list[ChatTurn] = []
+    user_message: str

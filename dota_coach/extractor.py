@@ -220,6 +220,21 @@ def extract_metrics(
     ]
     first_tower_minute = min(r["time"] for r in tower_kills) / 60.0 if tower_kills else None
 
+    # --- Step 11: all-role metrics (v2) ---
+    # ward_placements: obs_placed + sen_placed from final interval
+    ward_placements_val: int | None = None
+    if iv_our_final is not None:
+        obs_p = iv_our_final.get("obs_placed")
+        sen_p = iv_our_final.get("sen_placed")
+        if obs_p is not None and sen_p is not None:
+            ward_placements_val = obs_p + sen_p
+
+    # stacks_created: from match_meta players[] entry
+    stacks_created_val: int | None = our_meta.get("camps_stacked")
+
+    # hero_healing: from match_meta players[] entry
+    hero_healing_val: int | None = our_meta.get("hero_healing")
+
     return MatchMetrics(
         match_id=match_meta["match_id"],
         hero=our_hero_name,
@@ -243,4 +258,73 @@ def extract_metrics(
         teamfight_avg_damage_contribution=tf_avg_damage,
         first_roshan_minute=first_roshan_minute,
         first_tower_minute=first_tower_minute,
+        ward_placements=ward_placements_val,
+        stacks_created=stacks_created_val,
+        hero_healing=hero_healing_val,
+        turbo=match_meta.get("game_mode") == 23,
     )
+
+
+def build_timeline(records: list[dict], our_npc_name: str, hero_display: str = "") -> str:
+    """Build a compact chronological event log for chat system prompt.
+
+    Args:
+        records: list of event dicts from parser.parse_replay()
+        our_npc_name: npc_dota_hero_* name for our player
+        hero_display: human-readable hero name for the header
+
+    Returns:
+        Multi-line string of events, or empty string if no events found.
+    """
+    events: list[tuple[int, str]] = []
+
+    for r in records:
+        rtype = r.get("type", "")
+        rtime = r.get("time", 0)
+
+        # Player deaths
+        if (
+            rtype == "DOTA_COMBATLOG_DEATH"
+            and r.get("targethero") is True
+            and r.get("targetillusion") is False
+            and r.get("targetname") == our_npc_name
+        ):
+            attacker = r.get("attackername", "unknown")
+            attacker_short = attacker.replace("npc_dota_hero_", "").replace("_", " ").title()
+            events.append((rtime, f"you died to {attacker_short}"))
+
+        # Item purchases (our player)
+        if rtype == "DOTA_COMBATLOG_PURCHASE" and r.get("targetname") == our_npc_name and rtime > 0:
+            item = r.get("valuename", "unknown").replace("item_", "").replace("_", " ").title()
+            events.append((rtime, f"you purchased {item}"))
+
+        # Tower kills
+        if rtype == "DOTA_COMBATLOG_TEAM_BUILDING_KILL" and "tower" in r.get("targetname", ""):
+            tower_name = r.get("targetname", "tower")
+            team = "Radiant" if "goodguys" in tower_name else "Dire"
+            events.append((rtime, f"{tower_name} destroyed ({team} side)"))
+
+        # Roshan
+        if rtype == "CHAT_MESSAGE_ROSHAN_KILL":
+            events.append((rtime, "Roshan killed"))
+
+        # Ward placements (our player)
+        if rtype in ("obs", "sen") and r.get("slot") is not None:
+            # We don't have our_parser_slot here, so include all ward events
+            ward_type = "observer" if rtype == "obs" else "sentry"
+            events.append((rtime, f"{ward_type} ward placed"))
+
+    if not events:
+        return ""
+
+    # Sort chronologically and format
+    events.sort(key=lambda e: e[0])
+    lines = []
+    header = f"MATCH TIMELINE ({hero_display}):" if hero_display else "MATCH TIMELINE:"
+    lines.append(header)
+    for t, desc in events:
+        minutes = t // 60
+        seconds = t % 60
+        lines.append(f"{minutes:02d}:{seconds:02d} — {desc}")
+
+    return "\n".join(lines)

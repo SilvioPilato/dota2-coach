@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dota 2 Personal Coach</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- Input bar -->
+  <div class="input-bar">
+    <input type="text" id="matchId" placeholder="Match ID (e.g. 7823456789)">
+    <input type="text" id="playerId" placeholder="Player ID (optional)" style="max-width:220px">
+    <button id="analyzeBtn" onclick="runAnalysis()">Analyze</button>
+  </div>
+
+  <div class="spinner" id="spinner">Analyzing replay&hellip; this may take a minute</div>
+  <div class="error-banner" id="errorBanner"></div>
+
+  <!-- Report section (hidden until results arrive) -->
+  <div class="report" id="report">
+
+    <!-- Match header -->
+    <div class="match-header">
+      <span class="hero-name" id="heroName"></span>
+      <span class="badge badge-role" id="roleBadge"></span>
+      <span class="badge" id="resultBadge"></span>
+      <span id="duration"></span>
+      <span class="badge badge-patch" id="patchTag"></span>
+      <div class="role-override">
+        <select id="roleOverride" onchange="rerunWithRole()">
+          <option value="">Detected role</option>
+          <option value="1">Pos 1 — Carry</option>
+          <option value="2">Pos 2 — Mid</option>
+          <option value="3">Pos 3 — Offlaner</option>
+          <option value="4">Pos 4 — Soft Support</option>
+          <option value="5">Pos 5 — Hard Support</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Metric cards -->
+    <div class="metric-cards" id="metricCards"></div>
+
+    <!-- Two-column: stats + benchmarks -->
+    <div class="two-col">
+      <div class="panel" id="statsPanel">
+        <h3>Laning &amp; Role Details</h3>
+        <div id="statRows"></div>
+      </div>
+      <div class="panel" id="benchPanel">
+        <h3>Percentile Benchmarks</h3>
+        <div id="benchRows"></div>
+      </div>
+    </div>
+
+    <!-- Coaching report -->
+    <h2 class="section-title">Coaching Report</h2>
+    <div id="mistakeBlocks"></div>
+
+    <!-- Priority focus -->
+    <div class="priority-focus" id="priorityFocus" style="display:none">
+      <h3>&#9733; Priority Focus</h3>
+      <p id="priorityText"></p>
+    </div>
+
+    <!-- Chat panel -->
+    <h2 class="section-title" id="chatTitle">Ask your Coach</h2>
+    <div class="chat-panel" id="chatPanel">
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-bar">
+        <input type="text" id="chatInput" placeholder="Ask a follow-up question…"
+               onkeydown="if(event.key==='Enter')sendChat()">
+        <button id="chatSendBtn" onclick="sendChat()">Send</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ------------------------------------------------------------------ */
+/*  State                                                              */
+/* ------------------------------------------------------------------ */
+let lastMatchId = '';
+let lastPlayerId = '';
+let matchReport = null;   // Full MatchReport JSON from /analyze
+let chatHistory = [];     // Array of {role, content} turns
+
+/* ------------------------------------------------------------------ */
+/*  Role-adaptive metric card definitions                              */
+/* ------------------------------------------------------------------ */
+const ROLE_CARDS = {
+  1: [
+    { label: 'GPM',          key: m => m.gpm },
+    { label: 'LH @ 10',      key: m => m.lh_at_10 },
+    { label: 'First Core',   key: m => m.first_core_item_minute != null ? m.first_core_item_minute.toFixed(1) + ' min' : '—' },
+    { label: 'NW Δ @ 10',    key: m => (m.net_worth_at_10 - m.enemy_carry_net_worth_at_10) },
+  ],
+  2: [
+    { label: 'GPM',          key: m => m.gpm },
+    { label: 'LH @ 10',      key: m => m.lh_at_10 },
+    { label: 'First Core',   key: m => m.first_core_item_minute != null ? m.first_core_item_minute.toFixed(1) + ' min' : '—' },
+    { label: 'XPM',          key: m => m.xpm },
+  ],
+  3: [
+    { label: 'GPM',          key: m => m.gpm },
+    { label: 'LH @ 10',      key: m => m.lh_at_10 },
+    { label: 'Stacks',       key: m => m.stacks_created ?? 0 },
+    { label: 'TF %',         key: m => m.teamfight_participation_rate != null ? (m.teamfight_participation_rate * 100).toFixed(0) + '%' : '—' },
+  ],
+  4: [
+    { label: 'Wards',        key: m => m.ward_placements ?? 0 },
+    { label: 'Stacks',       key: m => m.stacks_created ?? 0 },
+    { label: 'Healing',      key: m => m.hero_healing ?? 0 },
+    { label: 'TF %',         key: m => m.teamfight_participation_rate != null ? (m.teamfight_participation_rate * 100).toFixed(0) + '%' : '—' },
+  ],
+  5: [
+    { label: 'Wards',        key: m => m.ward_placements ?? 0 },
+    { label: 'Stacks',       key: m => m.stacks_created ?? 0 },
+    { label: 'Healing',      key: m => m.hero_healing ?? 0 },
+    { label: 'TF %',         key: m => m.teamfight_participation_rate != null ? (m.teamfight_participation_rate * 100).toFixed(0) + '%' : '—' },
+  ],
+};
+
+/* ------------------------------------------------------------------ */
+/*  API call                                                           */
+/* ------------------------------------------------------------------ */
+async function runAnalysis(roleOverride) {
+  const matchId = document.getElementById('matchId').value.trim();
+  const playerId = document.getElementById('playerId').value.trim();
+  if (!matchId) return;
+
+  lastMatchId = matchId;
+  lastPlayerId = playerId;
+
+  // UI state: loading
+  document.getElementById('report').classList.remove('visible');
+  document.getElementById('errorBanner').classList.remove('visible');
+  document.getElementById('spinner').classList.add('visible');
+  document.getElementById('analyzeBtn').disabled = true;
+
+  const body = { match_id: matchId };
+  if (playerId) body.player_id = playerId;
+  if (roleOverride) body.role_override = Number(roleOverride);
+
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || err.error || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    renderReport(data);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    document.getElementById('spinner').classList.remove('visible');
+    document.getElementById('analyzeBtn').disabled = false;
+  }
+}
+
+function rerunWithRole() {
+  const sel = document.getElementById('roleOverride').value;
+  if (sel && lastMatchId) runAnalysis(Number(sel));
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorBanner');
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+
+/* ------------------------------------------------------------------ */
+/*  Render helpers                                                     */
+/* ------------------------------------------------------------------ */
+function renderReport(d) {
+  // Store report for chat context & reset chat
+  matchReport = d;
+  chatHistory = [];
+  document.getElementById('chatMessages').innerHTML = '';
+
+  // Header
+  document.getElementById('heroName').textContent = d.hero;
+  const roleBadge = document.getElementById('roleBadge');
+  roleBadge.textContent = `Pos ${d.role} — ${d.role_label}`;
+  const rb = document.getElementById('resultBadge');
+  rb.textContent = d.result.toUpperCase();
+  rb.className = 'badge ' + (d.result === 'win' ? 'badge-win' : 'badge-loss');
+  document.getElementById('duration').textContent = `${d.duration_minutes.toFixed(0)} min`;
+  document.getElementById('patchTag').textContent = d.patch || '';
+  document.getElementById('roleOverride').value = '';
+
+  // Turbo badge
+  let turboEl = document.getElementById('turboBadge');
+  if (!turboEl) {
+    turboEl = document.createElement('span');
+    turboEl.id = 'turboBadge';
+    turboEl.className = 'badge badge-turbo';
+    document.querySelector('.match-header').appendChild(turboEl);
+  }
+  turboEl.textContent = d.turbo ? '⚡ TURBO' : '';
+  turboEl.style.display = d.turbo ? '' : 'none';
+
+  // Metric cards
+  const cards = ROLE_CARDS[d.role] || ROLE_CARDS[1];
+  const mc = document.getElementById('metricCards');
+  mc.innerHTML = cards.map(c =>
+    `<div class="metric-card"><div class="label">${c.label}</div><div class="value">${c.key(d.metrics)}</div></div>`
+  ).join('');
+
+  // Stats panel
+  const m = d.metrics;
+  const stats = [
+    ['LH @ 10', m.lh_at_10],
+    ['Denies @ 10', m.denies_at_10],
+    ['Deaths < 10 min', m.deaths_before_10],
+    ['NW @ 10', m.net_worth_at_10?.toLocaleString() ?? '—'],
+    ['GPM', m.gpm],
+    ['XPM', m.xpm],
+    ['TF Participation', m.teamfight_participation_rate != null ? (m.teamfight_participation_rate * 100).toFixed(0) + '%' : '—'],
+    ['Ward Purchases', m.ward_purchases],
+  ];
+  document.getElementById('statRows').innerHTML = stats.map(([k, v]) =>
+    `<div class="stat-row"><span>${k}</span><span>${v}</span></div>`
+  ).join('');
+
+  // Benchmarks
+  const bch = document.getElementById('benchRows');
+  if (d.turbo) {
+    bch.innerHTML = '<div class="turbo-notice">&#9889; Turbo mode &mdash; percentile benchmarks not available for this game mode.<br><span style="color:var(--text-muted);font-size:13px">Coaching is based on absolute metrics and Turbo-specific reference values.</span></div>';
+  } else if (d.benchmarks && d.benchmarks.length) {
+    bch.innerHTML = d.benchmarks.map(b => {
+      const pct = Math.round(b.player_pct * 100);
+      return `<div class="bench-row">
+        <div class="bench-label"><span>${fmtBenchName(b.metric)}</span><span>${pct}%</span></div>
+        <div class="bench-bar"><div class="bench-fill" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join('');
+  } else {
+    bch.innerHTML = '<p style="color:var(--text-muted)">No benchmark data</p>';
+  }
+
+  // Coaching report — parse MISTAKE blocks
+  renderMistakes(d.coaching_report, d.errors);
+
+  // Priority focus
+  const pf = document.getElementById('priorityFocus');
+  const pfText = d.priority_focus || extractPriorityFocus(d.coaching_report);
+  if (pfText) {
+    document.getElementById('priorityText').textContent = pfText;
+    pf.style.display = '';
+  } else {
+    pf.style.display = 'none';
+  }
+
+  document.getElementById('report').classList.add('visible');
+}
+
+function fmtBenchName(s) {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function renderMistakes(report, errors) {
+  const container = document.getElementById('mistakeBlocks');
+  // Try parsing MISTAKE lines from LLM output
+  const blocks = parseMistakeBlocks(report);
+
+  if (blocks.length) {
+    container.innerHTML = blocks.map(b =>
+      `<div class="mistake-block">
+        <span class="sev sev-${b.severity}">${b.severity}</span>
+        <div class="desc">${b.description}</div>
+        <div class="fix">&rarr; ${b.fix}</div>
+      </div>`
+    ).join('');
+  } else if (errors && errors.length) {
+    // Fallback to structured errors from detector
+    container.innerHTML = errors.slice(0, 3).map(e =>
+      `<div class="mistake-block">
+        <span class="sev sev-${e.severity}">${e.severity}</span>
+        <div class="desc">${e.description}</div>
+        ${e.context ? `<div class="fix">&rarr; ${e.context}</div>` : ''}
+      </div>`
+    ).join('');
+  } else {
+    container.innerHTML = '<p style="color:var(--text-muted)">No mistakes detected — nice game!</p>';
+  }
+}
+
+function parseMistakeBlocks(text) {
+  if (!text) return [];
+  const blocks = [];
+  const regex = /MISTAKE\s+\d+\s*\((\w+)\)\s*:\s*(.+?)(?:\n→\s*Fix:\s*(.+?))?(?=\nMISTAKE|\nPRIORITY|$)/gis;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    blocks.push({
+      severity: m[1].toLowerCase(),
+      description: m[2].trim(),
+      fix: m[3] ? m[3].trim() : '',
+    });
+  }
+  return blocks;
+}
+
+function extractPriorityFocus(text) {
+  if (!text) return '';
+  const m = text.match(/PRIORITY\s+FOCUS\s*:\s*(.+)/i);
+  return m ? m[1].trim() : '';
+}
+
+/* ------------------------------------------------------------------ */
+/*  Chat panel                                                         */
+/* ------------------------------------------------------------------ */
+function appendChatBubble(role, text) {
+  const el = document.createElement('div');
+  el.className = 'chat-bubble chat-' + role;
+  el.textContent = text;
+  document.getElementById('chatMessages').appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  return el;
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg || !matchReport) return;
+
+  input.value = '';
+  document.getElementById('chatSendBtn').disabled = true;
+
+  // User bubble
+  appendChatBubble('user', msg);
+  chatHistory.push({ role: 'user', content: msg });
+
+  // Streaming assistant bubble
+  const bubble = appendChatBubble('assistant', '');
+  bubble.classList.add('chat-streaming');
+
+  const body = {
+    match_context: matchReport,
+    history: chatHistory.slice(0, -1), // history before this message
+    user_message: msg,
+  };
+
+  let fullText = '';
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6);
+        if (payload === '[DONE]') continue;
+        fullText += payload;
+        bubble.textContent = fullText;
+      }
+      bubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  } catch (e) {
+    fullText = fullText || '(Error: ' + e.message + ')';
+    bubble.textContent = fullText;
+  }
+
+  bubble.classList.remove('chat-streaming');
+  chatHistory.push({ role: 'assistant', content: fullText });
+  document.getElementById('chatSendBtn').disabled = false;
+  document.getElementById('chatInput').focus();
+}
+</script>
+
+</body>
+</html>

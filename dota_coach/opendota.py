@@ -63,3 +63,29 @@ def identify_enemy_carry(match: dict, our_account_id: int) -> dict | None:
         ),
         None,
     )
+
+
+async def get_benchmarks(hero_id: int) -> dict:
+    """GET /benchmarks?hero_id={hero_id} — returns percentile benchmark data for a hero."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"{BASE_URL}/benchmarks",
+            params={"hero_id": hero_id},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def get_hero_id(hero_name: str, heroes_data: dict) -> int | None:
+    """Lookup hero_id from dotaconstants heroes.json data by localized_name or internal name.
+
+    heroes_data is a dict keyed by hero_id (str) with values containing 'localized_name' and 'name'.
+    Returns None if no match found.
+    """
+    for hid, info in heroes_data.items():
+        if info.get("localized_name", "").lower() == hero_name.lower():
+            return int(hid)
+        # Also match internal npc name like "npc_dota_hero_anti_mage"
+        if info.get("name", "").lower() == hero_name.lower():
+            return int(hid)
+    return None

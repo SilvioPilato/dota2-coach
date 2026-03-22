@@ -1,11 +1,11 @@
-"""Tests for prompt.py: token budget and message format."""
+"""Tests for prompt.py: token budget and message format (v2: role-aware)."""
 from __future__ import annotations
 
 import warnings
 
 import pytest
 
-from dota_coach.models import DetectedError, MatchMetrics
+from dota_coach.models import DetectedError, EnrichmentContext, HeroBenchmark, MatchMetrics
 from dota_coach.prompt import build_system_prompt, build_user_message
 
 _TOKEN_BUDGET = 800
@@ -72,7 +72,8 @@ def _sample_errors() -> list[DetectedError]:
 
 def test_system_prompt_contains_role():
     s = build_system_prompt()
-    assert "carry coach" in s.lower()
+    assert "carry" in s.lower()
+    assert "position 1" in s.lower()
 
 
 def test_system_prompt_contains_format_instructions():
@@ -83,7 +84,8 @@ def test_system_prompt_contains_format_instructions():
 
 def test_system_prompt_mentions_bracket():
     s = build_system_prompt()
-    assert "Crusader" in s or "Archon" in s
+    # v2: bracket references replaced with percentile-based approach
+    assert "percentile" in s.lower() or "Dota 2 coach" in s
 
 
 # ---------------------------------------------------------------------------
@@ -97,24 +99,20 @@ def test_user_message_contains_match_header():
     assert "35" in msg
 
 
-def test_user_message_contains_laning_section():
+def test_user_message_contains_performance_section():
     msg = build_user_message(_make_metrics(), [])
-    assert "LANING" in msg
-    assert "Last hits" in msg
-    assert "Deaths" in msg
-
-
-def test_user_message_contains_farming_section():
-    msg = build_user_message(_make_metrics(), [])
-    assert "FARMING" in msg
+    assert "PERFORMANCE" in msg
     assert "GPM" in msg
-    assert "First core item" in msg
 
 
-def test_user_message_contains_positioning_section():
+def test_user_message_contains_core_item():
     msg = build_user_message(_make_metrics(), [])
-    assert "POSITIONING" in msg
-    assert "Ward purchases" in msg
+    assert "First core" in msg
+
+
+def test_user_message_contains_nw_delta():
+    msg = build_user_message(_make_metrics(), [])
+    assert "Net worth delta" in msg
 
 
 def test_user_message_contains_teamfight_section_when_data_present():
@@ -123,9 +121,10 @@ def test_user_message_contains_teamfight_section_when_data_present():
     assert "35%" in msg
 
 
-def test_user_message_omits_teamfight_section_when_none():
+def test_user_message_shows_na_when_teamfight_none():
     msg = build_user_message(_make_metrics(teamfight_participation_rate=None), [])
-    assert "TEAMFIGHTS" not in msg
+    assert "TEAMFIGHTS" in msg
+    assert "N/A" in msg
 
 
 def test_user_message_contains_detected_issues_section():
@@ -224,3 +223,98 @@ def test_token_budget_warning_is_raised_when_exceeded():
         assert any("tokens" in str(w.message).lower() for w in caught)
     finally:
         p_mod._TOKEN_BUDGET = original
+
+
+# ---------------------------------------------------------------------------
+# v2: Role-aware system prompt
+# ---------------------------------------------------------------------------
+
+def test_system_prompt_role_2_says_mid():
+    s = build_system_prompt(role=2)
+    assert "mid" in s.lower()
+    assert "position 2" in s.lower()
+
+
+def test_system_prompt_role_5_says_hard_support():
+    s = build_system_prompt(role=5)
+    assert "hard support" in s.lower()
+
+
+def test_system_prompt_includes_few_shot_example():
+    s = build_system_prompt(role=1)
+    assert "EXAMPLE" in s
+
+
+def test_system_prompt_each_role_has_different_example():
+    s1 = build_system_prompt(role=1)
+    s2 = build_system_prompt(role=2)
+    assert s1 != s2
+
+
+# ---------------------------------------------------------------------------
+# v2: Role-specific user message rendering
+# ---------------------------------------------------------------------------
+
+def test_user_message_pos1_shows_nw_delta():
+    msg = build_user_message(_make_metrics(), [], role=1)
+    assert "Net worth delta" in msg
+
+
+def test_user_message_pos5_shows_ward_placements():
+    msg = build_user_message(_make_metrics(ward_placements=8), [], role=5)
+    assert "Ward placements" in msg
+
+
+def test_user_message_pos3_shows_stacks():
+    msg = build_user_message(_make_metrics(stacks_created=3), [], role=3)
+    assert "Stacks created" in msg
+
+
+def test_user_message_with_enrichment_shows_patch_context():
+    enrichment = EnrichmentContext(
+        patch_name="7.38c",
+        benchmarks=[
+            HeroBenchmark(metric="gold_per_min", player_value=400, player_pct=0.5, bracket_avg=420),
+        ],
+        item_costs={"item_battle_fury": 4600},
+        hero_base_stats={"base_attack_min": 46, "base_attack_max": 51, "move_speed": 285},
+    )
+    msg = build_user_message(_make_metrics(), [], role=1, enrichment=enrichment)
+    assert "PATCH CONTEXT" in msg
+    assert "4600g" in msg
+
+
+def test_user_message_with_enrichment_shows_percentile():
+    enrichment = EnrichmentContext(
+        patch_name="7.38c",
+        benchmarks=[
+            HeroBenchmark(metric="gold_per_min", player_value=342, player_pct=0.25, bracket_avg=420),
+        ],
+        item_costs={},
+        hero_base_stats={},
+    )
+    msg = build_user_message(_make_metrics(), [], role=1, enrichment=enrichment)
+    assert "25%" in msg or "pct" in msg
+
+
+def test_user_message_no_enrichment_no_patch_context():
+    msg = build_user_message(_make_metrics(), [], role=1)
+    assert "PATCH CONTEXT" not in msg
+
+
+def test_token_budget_under_1200_for_all_roles():
+    """v2 PRD says target under 1200 input tokens."""
+    enrichment = EnrichmentContext(
+        patch_name="7.38c",
+        benchmarks=[
+            HeroBenchmark(metric="gold_per_min", player_value=400, player_pct=0.50, bracket_avg=420),
+            HeroBenchmark(metric="last_hits_per_min", player_value=5.0, player_pct=0.45, bracket_avg=5.5),
+        ],
+        item_costs={"item_battle_fury": 4600, "item_manta": 4900},
+        hero_base_stats={"base_attack_min": 46, "base_attack_max": 51, "move_speed": 285},
+    )
+    for role in (1, 2, 3, 4, 5):
+        system = build_system_prompt(role=role)
+        user = build_user_message(_make_metrics(), _sample_errors(), role=role, enrichment=enrichment)
+        estimated = len(system) // 4 + len(user) // 4
+        assert estimated <= 1200, f"Role {role}: {estimated} tokens > 1200"

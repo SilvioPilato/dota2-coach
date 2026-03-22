@@ -1,10 +1,16 @@
-"""Unit tests for all 10 threshold rules in detector.py."""
+"""Unit tests for all threshold rules in detector.py (v1 + v2 percentile)."""
 from __future__ import annotations
 
 import pytest
 
-from dota_coach.detector import detect_errors
-from dota_coach.models import MatchMetrics
+from dota_coach.detector import SEVERITY_THRESHOLDS, detect_errors
+from dota_coach.models import (
+    DetectedError,
+    EnrichmentContext,
+    HeroBenchmark,
+    MatchMetrics,
+    RoleProfile,
+)
 
 
 def _base_metrics(**overrides) -> MatchMetrics:
@@ -310,4 +316,153 @@ def test_at_most_three_errors_returned():
         laning_heatmap_own_half_pct=0.80,
         ward_purchases=3,
     ))
+    assert len(errors) <= 3
+
+
+# ===========================================================================
+# v2 percentile-based tests
+# ===========================================================================
+
+def _carry_profile() -> RoleProfile:
+    return RoleProfile(
+        observed_metrics=["gpm", "lh_at_10", "teamfight_participation"],
+        death_limit_before_10=2,
+        tf_participation_limit=0.40,
+        ward_rule="flag_if_laning_phase",
+    )
+
+
+def _support_profile() -> RoleProfile:
+    return RoleProfile(
+        observed_metrics=["ward_placements", "teamfight_participation"],
+        death_limit_before_10=3,
+        tf_participation_limit=0.55,
+        ward_rule="require_minimum",
+    )
+
+
+def _enrichment(gpm_pct: float = 0.5, xpm_pct: float = 0.5, lh_pct: float = 0.5) -> EnrichmentContext:
+    return EnrichmentContext(
+        patch_name="7.38c",
+        benchmarks=[
+            HeroBenchmark(metric="gold_per_min", player_value=400, player_pct=gpm_pct, bracket_avg=420),
+            HeroBenchmark(metric="xp_per_min", player_value=500, player_pct=xpm_pct, bracket_avg=500),
+            HeroBenchmark(metric="last_hits_per_min", player_value=5.0, player_pct=lh_pct, bracket_avg=5.5),
+        ],
+        item_costs={},
+        hero_base_stats={},
+    )
+
+
+def test_pct_critical_when_below_20():
+    errors = detect_errors(
+        _base_metrics(),
+        role_profile=_carry_profile(),
+        enrichment=_enrichment(gpm_pct=0.15),
+    )
+    cats = _categories(errors)
+    assert "Low GPM" in cats
+    gpm_err = next(e for e in errors if e.category == "Low GPM")
+    assert gpm_err.severity == "critical"
+    assert gpm_err.player_pct == 0.15
+
+
+def test_pct_high_when_between_20_and_35():
+    errors = detect_errors(
+        _base_metrics(),
+        role_profile=_carry_profile(),
+        enrichment=_enrichment(gpm_pct=0.25),
+    )
+    gpm_err = next(e for e in errors if e.category == "Low GPM")
+    assert gpm_err.severity == "high"
+
+
+def test_pct_medium_when_between_35_and_45():
+    errors = detect_errors(
+        _base_metrics(),
+        role_profile=_carry_profile(),
+        enrichment=_enrichment(gpm_pct=0.40),
+    )
+    gpm_err = next(e for e in errors if e.category == "Low GPM")
+    assert gpm_err.severity == "medium"
+
+
+def test_pct_no_error_when_above_45():
+    errors = detect_errors(
+        _base_metrics(),
+        role_profile=_carry_profile(),
+        enrichment=_enrichment(gpm_pct=0.50),
+    )
+    cats = _categories(errors)
+    assert "Low GPM" not in cats
+
+
+def test_role_specific_death_limit():
+    """Offlaner with death_limit=3 should not trigger at 3 deaths."""
+    offlaner = RoleProfile(
+        observed_metrics=["gpm"],
+        death_limit_before_10=3,
+        tf_participation_limit=0.50,
+        ward_rule="none",
+    )
+    errors = detect_errors(
+        _base_metrics(deaths_before_10=3, death_timestamps_laning=[2.0, 5.0, 8.0]),
+        role_profile=offlaner,
+        enrichment=_enrichment(),
+    )
+    assert "Unsafe laning" not in _categories(errors)
+
+
+def test_role_specific_death_limit_fires_at_4():
+    offlaner = RoleProfile(
+        observed_metrics=["gpm"],
+        death_limit_before_10=3,
+        tf_participation_limit=0.50,
+        ward_rule="none",
+    )
+    errors = detect_errors(
+        _base_metrics(deaths_before_10=4, death_timestamps_laning=[2.0, 5.0, 8.0, 9.0]),
+        role_profile=offlaner,
+        enrichment=_enrichment(),
+    )
+    assert "Unsafe laning" in _categories(errors)
+
+
+def test_support_low_wards_fires():
+    errors = detect_errors(
+        _base_metrics(ward_placements=5),
+        role_profile=_support_profile(),
+        enrichment=_enrichment(),
+    )
+    assert "Low ward output" in _categories(errors)
+
+
+def test_support_adequate_wards_no_error():
+    errors = detect_errors(
+        _base_metrics(ward_placements=10),
+        role_profile=_support_profile(),
+        enrichment=_enrichment(),
+    )
+    assert "Low ward output" not in _categories(errors)
+
+
+def test_v2_no_absolute_laning_rules_when_enrichment_given():
+    """When enrichment is provided, v1 absolute rules (Poor laning CS, etc.) should NOT fire."""
+    errors = detect_errors(
+        _base_metrics(lh_at_10=20, laning_heatmap_own_half_pct=0.90),
+        role_profile=_carry_profile(),
+        enrichment=_enrichment(gpm_pct=0.50, lh_pct=0.50),
+    )
+    cats = _categories(errors)
+    assert "Poor laning CS" not in cats
+    assert "Passive laning" not in cats
+
+
+def test_v2_top3_limit_with_percentile_errors():
+    """Even with many percentile errors, at most 3 returned."""
+    errors = detect_errors(
+        _base_metrics(deaths_before_10=4, death_timestamps_laning=[1.0, 3.0, 5.0, 8.0]),
+        role_profile=_carry_profile(),
+        enrichment=_enrichment(gpm_pct=0.10, lh_pct=0.10),
+    )
     assert len(errors) <= 3

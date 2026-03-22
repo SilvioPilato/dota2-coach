@@ -36,3 +36,29 @@ def get_coaching(system_prompt: str, user_message: str, model: str) -> str:
     except Exception as exc:
         provider = model.split("/")[0] if "/" in model else model
         raise CoachError(f"LLM call failed for provider '{provider}': {exc}") from exc
+
+
+async def stream_llm(messages: list[dict], model: str):
+    """
+    Async generator yielding text chunks from LiteLLM streaming completion.
+
+    Usage with FastAPI StreamingResponse:
+        return StreamingResponse(stream_llm(msgs, model), media_type="text/event-stream")
+    """
+    try:
+        import litellm
+
+        response = await litellm.acompletion(
+            model=model,
+            messages=messages,
+            stream=True,
+            timeout=300,
+        )
+        async for chunk in response:
+            delta = chunk.choices[0].delta
+            text = getattr(delta, "content", None) or ""
+            if text:
+                yield text
+    except Exception as exc:
+        provider = model.split("/")[0] if "/" in model else model
+        raise CoachError(f"LLM streaming failed for provider '{provider}': {exc}") from exc
