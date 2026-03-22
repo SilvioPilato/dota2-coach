@@ -33,12 +33,13 @@ _RANK_TO_STRATZ_BRACKET: dict[int, str] = {
 }
 
 _BRACKET_BENCHMARKS_QUERY = """
-query HeroBracketBenchmarks($heroId: Short!, $bracketIds: [RankBracketBasicEnum]) {
+query HeroBracketBenchmarks($heroIds: [Short], $bracketIds: [RankBracketBasicEnum]) {
   heroStats {
-    stats(heroId: $heroId, bracketBasicIds: $bracketIds) {
-      goldPerMin { percentile value }
-      xpPerMin { percentile value }
-      lastHitsPerMin { percentile value }
+    stats(heroIds: $heroIds, bracketBasicIds: $bracketIds) {
+      cs
+      xp
+      matchCount
+      time
     }
   }
 }
@@ -56,12 +57,14 @@ def rank_tier_to_stratz_bracket(rank_tier: int) -> str:
 async def get_hero_bracket_benchmarks(
     hero_id: int,
     bracket: str,
-) -> dict[str, list[dict]] | None:
-    """Fetch bracket-filtered hero benchmarks from STRATZ heroStats.
+) -> dict[str, float] | None:
+    """Fetch bracket-average stats from STRATZ heroStats for a given hero + bracket.
 
-    Returns a dict mapping metric name → list of {percentile, value} dicts,
-    in the same format as OpenDota benchmarks result. Returns None on any error
-    (caller should fall back to global OpenDota benchmarks).
+    Returns a dict of {metric_name: bracket_average} for use as bracket_avg in
+    HeroBenchmark. Metrics use OpenDota naming conventions:
+      "gold_per_min" → averaging goldPerMinute
+      "last_hits_per_min" → cs (raw, not normalised — caller should use for comparison only)
+    Returns None on any error; caller falls back to global OpenDota median.
 
     Args:
         hero_id: OpenDota/Dota2 hero ID
@@ -77,7 +80,7 @@ async def get_hero_bracket_benchmarks(
                 STRATZ_GRAPHQL_URL,
                 json={
                     "query": _BRACKET_BENCHMARKS_QUERY,
-                    "variables": {"heroId": hero_id, "bracketIds": [bracket]},
+                    "variables": {"heroIds": [hero_id], "bracketIds": [bracket]},
                 },
                 headers={
                     "Authorization": f"Bearer {api_key}",
@@ -85,40 +88,56 @@ async def get_hero_bracket_benchmarks(
                     "User-Agent": "STRATZ_API",
                 },
             )
-            response.raise_for_status()
+            if not response.is_success:
+                logger.warning(
+                    "STRATZ bracket benchmark request failed for hero %s: HTTP %s — %s",
+                    hero_id, response.status_code, response.text[:500],
+                )
+                return None
             data = response.json()
     except Exception as exc:
         logger.warning("STRATZ bracket benchmark request failed for hero %s: %s", hero_id, exc)
+        return None
+
+    # GraphQL can return 200 with errors[] — treat that as a soft failure too
+    if "errors" in data:
+        logger.warning(
+            "STRATZ bracket benchmark GraphQL errors for hero %s: %s",
+            hero_id, data["errors"],
+        )
         return None
 
     try:
         stats_list = data["data"]["heroStats"]["stats"]
         if not stats_list:
             return None
-        stats = stats_list[0]
-    except (KeyError, TypeError, IndexError):
-        logger.warning("Unexpected STRATZ benchmark response shape for hero %s", hero_id)
+        # Aggregate all returned rows using matchCount as weight
+        total_matches = sum(s.get("matchCount") or 0 for s in stats_list)
+        if total_matches == 0:
+            return None
+
+        def _wavg(field: str) -> float | None:
+            vals = [(s.get(field) or 0.0, s.get("matchCount") or 0) for s in stats_list]
+            weighted = sum(v * w for v, w in vals)
+            return weighted / total_matches if total_matches else None
+
+        cs_avg = _wavg("cs")
+        xp_avg = _wavg("xp")
+        time_avg = _wavg("time")  # average game duration in minutes
+
+        result: dict[str, float] = {}
+        # Derive per-minute rates from totals using average duration
+        if cs_avg is not None and time_avg and time_avg > 0:
+            result["last_hits_per_min"] = cs_avg / time_avg
+        if xp_avg is not None and time_avg and time_avg > 0:
+            result["xp_per_min"] = xp_avg / time_avg
+        # goldPerMinute is None in STRATZ heroStats — no GPM bracket average available
+
+        return result if result else None
+
+    except (KeyError, TypeError) as exc:
+        logger.warning("Unexpected STRATZ benchmark response shape for hero %s: %s", hero_id, exc)
         return None
-
-    # Normalise: STRATZ uses camelCase keys; map to OpenDota snake_case
-    _KEY_MAP = {
-        "goldPerMin": "gold_per_min",
-        "xpPerMin": "xp_per_min",
-        "lastHitsPerMin": "last_hits_per_min",
-    }
-    result: dict[str, list[dict]] = {}
-    for stratz_key, odota_key in _KEY_MAP.items():
-        pts = stats.get(stratz_key)
-        if pts:
-            # Normalise percentile to 0-1 range (STRATZ may return 0-100)
-            normalised = [
-                {"percentile": p["percentile"] / 100.0 if p["percentile"] > 1 else p["percentile"],
-                 "value": p["value"]}
-                for p in pts
-            ]
-            result[odota_key] = normalised
-
-    return result if result else None
 
 
 async def get_match_positions(match_id: int) -> dict[int, int] | None:

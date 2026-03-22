@@ -165,15 +165,14 @@ async def enrich(
     benchmarks_list: list[HeroBenchmark] = []
     bracket_source = "global"
     if hero_id is not None:
-        # Try STRATZ bracket-filtered benchmarks first (v3 feature)
-        stratz_bench = await get_hero_bracket_benchmarks(hero_id, bracket)
-        if stratz_bench is not None:
-            bench_result = stratz_bench
+        # Always fetch OpenDota global benchmarks for percentile ranking
+        bench_data = await _get_benchmarks_cached(hero_id)
+        bench_result = bench_data.get("result", {})
+
+        # Optionally overlay bracket averages from STRATZ for a more relevant bracket_avg
+        stratz_avgs = await get_hero_bracket_benchmarks(hero_id, bracket)
+        if stratz_avgs:
             bracket_source = f"stratz_{bracket.lower()}"
-        else:
-            # Fall back to global OpenDota benchmarks
-            bench_data = await _get_benchmarks_cached(hero_id)
-            bench_result = bench_data.get("result", {})
 
         # Map metric names to (benchmark_key, player_value) pairs
         metric_map = {
@@ -187,13 +186,18 @@ async def enrich(
         for bench_key, player_val in metric_map.items():
             if bench_key in bench_result:
                 pct = _interpolate_pct(bench_result[bench_key], player_val)
-                median = _median_from_benchmarks(bench_result[bench_key])
+                # Use STRATZ bracket average if available, otherwise fall back to OpenDota global median
+                bracket_avg = (
+                    stratz_avgs[bench_key]
+                    if stratz_avgs and bench_key in stratz_avgs
+                    else _median_from_benchmarks(bench_result[bench_key])
+                )
                 benchmarks_list.append(
                     HeroBenchmark(
                         metric=bench_key,
                         player_value=float(player_val),
                         player_pct=pct,
-                        bracket_avg=median,
+                        bracket_avg=bracket_avg,
                     )
                 )
 
