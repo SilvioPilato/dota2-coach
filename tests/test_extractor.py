@@ -25,6 +25,8 @@ MATCH_META = {
             "isRadiant": True,
             "lane_role": 1,
             "win": 0,
+            "gold_per_min": 342,
+            "xp_per_min": 428,
         },
         {
             "account_id": NAGA_ACCOUNT_ID,
@@ -113,12 +115,12 @@ def test_enemy_carry_net_worth_at_20(metrics):
 # ---------------------------------------------------------------------------
 
 def test_gpm_is_derived_from_final_networth(metrics):
-    # networth at final interval (2100s) = 12000; 12000 / 35 = 342
+    # gpm comes from match_meta gold_per_min (342)
     assert metrics.gpm == 342
 
 
 def test_xpm_is_derived_from_final_xp(metrics):
-    # xp at final interval (2100s) = 15000; 15000 / 35 = 428
+    # xpm comes from match_meta xp_per_min (428)
     assert metrics.xpm == 428
 
 

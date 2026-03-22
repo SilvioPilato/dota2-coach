@@ -21,7 +21,12 @@
       "Bash(git push:*)",
       "Bash(bd doctor:*)",
       "Bash(bd migrate:*)",
-      "Bash(bd vc:*)"
+      "Bash(bd vc:*)",
+      "Bash(bd dolt:*)",
+      "Bash(dolt -r .beads/dolt remote -v)",
+      "Bash(dolt remote:*)",
+      "Bash(bd stats:*)",
+      "Bash(bd epic:*)"
     ]
   }
 }

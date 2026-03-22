@@ -10,7 +10,7 @@ from dota_coach.role import ROLE_LABELS, ROLE_PROFILES, detect_role, get_role_pr
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_match_meta(account_id: int, lane_role: int, last_hits: int = 200) -> dict:
+def _make_match_meta(account_id: int, lane_role: int, last_hits: int = 200, gold_per_min: int = 400) -> dict:
     """Build a minimal match_meta dict for a single player."""
     return {
         "players": [
@@ -18,6 +18,7 @@ def _make_match_meta(account_id: int, lane_role: int, last_hits: int = 200) -> d
                 "account_id": account_id,
                 "lane_role": lane_role,
                 "last_hits": last_hits,
+                "gold_per_min": gold_per_min,
                 "isRadiant": True,
                 "player_slot": 0,
             }
@@ -35,7 +36,13 @@ class TestDetectRole:
         assert detect_role(meta, 123) == 1
 
     def test_safe_lane_support_returns_pos5(self):
-        meta = _make_match_meta(123, lane_role=1, last_hits=20)
+        # Two players in the safe lane; account 123 has lower GPM → pos 5 (support)
+        meta = {
+            "players": [
+                {"account_id": 123, "lane_role": 1, "gold_per_min": 200, "isRadiant": True, "player_slot": 0},
+                {"account_id": 456, "lane_role": 1, "gold_per_min": 500, "isRadiant": True, "player_slot": 1},
+            ]
+        }
         assert detect_role(meta, 123) == 5
 
     def test_mid_returns_pos2(self):
@@ -47,7 +54,13 @@ class TestDetectRole:
         assert detect_role(meta, 123) == 3
 
     def test_off_lane_support_returns_pos4(self):
-        meta = _make_match_meta(123, lane_role=3, last_hits=30)
+        # Two players in the offlane; account 123 has lower GPM → pos 4 (soft support)
+        meta = {
+            "players": [
+                {"account_id": 123, "lane_role": 3, "gold_per_min": 200, "isRadiant": True, "player_slot": 0},
+                {"account_id": 456, "lane_role": 3, "gold_per_min": 400, "isRadiant": True, "player_slot": 1},
+            ]
+        }
         assert detect_role(meta, 123) == 4
 
     def test_jungle_returns_pos4(self):
@@ -64,10 +77,10 @@ class TestDetectRole:
         with pytest.raises(ValueError, match="not found"):
             detect_role(meta, 999)
 
-    def test_missing_lane_role_raises(self):
-        meta = {"players": [{"account_id": 123}]}
-        with pytest.raises(ValueError, match="lane_role not available"):
-            detect_role(meta, 123)
+    def test_missing_lane_role_falls_back_to_support(self):
+        # lane_role=None (e.g. Turbo/unprocessed match) → falls back to heuristics
+        meta = {"players": [{"account_id": 123, "last_hits": 5, "gold_per_min": 100}]}
+        assert detect_role(meta, 123) == 5  # low stats → support fallback
 
 
 # ---------------------------------------------------------------------------

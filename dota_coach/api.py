@@ -92,10 +92,16 @@ async def analyze(req: AnalyzeRequest):
     if req.role_override and 1 <= req.role_override <= 5:
         role = req.role_override
     else:
-        try:
-            role = detect_role(match_meta, account_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f"Could not detect player role: {exc}")
+        from dota_coach.stratz import get_match_positions
+        # Try Stratz first for accurate pos 1-5; fall back to heuristic if unavailable
+        stratz_positions = await get_match_positions(match_id_int)
+        if stratz_positions and account_id in stratz_positions:
+            role = stratz_positions[account_id]
+        else:
+            try:
+                role = detect_role(match_meta, account_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Could not detect player role: {exc}")
 
     role_label = ROLE_LABELS.get(role, "carry")
     role_profile = get_role_profile(role)
