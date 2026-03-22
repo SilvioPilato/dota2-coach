@@ -30,6 +30,8 @@ class AnalyzeRequest(BaseModel):
     match_id: str
     player_id: str | None = None
     role_override: int | None = None  # 1-5 to override auto-detected role
+    force_reanalyze: bool = False    # skip analysis cache; re-run full pipeline (keep .dem)
+    force_redownload: bool = False   # delete .dem and re-download; implies force_reanalyze
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +41,7 @@ class AnalyzeRequest(BaseModel):
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     """Run the full analysis pipeline and return the coaching report as JSON."""
+    from dota_coach.cache import read_analysis_cache, write_analysis_cache
     from dota_coach.coach import CoachError, get_coaching
     from dota_coach.detector import detect_errors
     from dota_coach.downloader import ReplayExpiredError, download_and_decompress
@@ -46,6 +49,7 @@ async def analyze(req: AnalyzeRequest):
     from dota_coach.extractor import build_timeline, extract_metrics
     from dota_coach.models import MatchReport
     from dota_coach.opendota import get_match
+    from dota_coach.opendota import request_parse_and_wait
     from dota_coach.parser import ParserNotRunningError, check_sidecar_health, parse_replay
     from dota_coach.prompt import build_system_prompt, build_user_message
     from dota_coach.role import ROLE_LABELS, detect_role, get_role_profile
@@ -70,9 +74,12 @@ async def analyze(req: AnalyzeRequest):
     # 3. Identify our player
     if req.player_id:
         try:
-            account_id = int(req.player_id)
+            raw_id = int(req.player_id)
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Invalid player_id: {req.player_id}")
+        # Convert Steam64 ID to 32-bit account_id used by OpenDota
+        _STEAM64_BASE = 76561197960265728
+        account_id = raw_id - _STEAM64_BASE if raw_id > _STEAM64_BASE else raw_id
     else:
         # Use first player as fallback (for demo/testing)
         players = match_meta.get("players", [])
@@ -92,10 +99,35 @@ async def analyze(req: AnalyzeRequest):
     role_label = ROLE_LABELS.get(role, "carry")
     role_profile = get_role_profile(role)
 
+    # Cache read — short-circuit if we have a fresh result for this match+player+role
+    if not req.force_reanalyze and not req.force_redownload:
+        cached = read_analysis_cache(match_id_int, account_id, role)
+        if cached:
+            return JSONResponse(content=cached)
+
     # 5. Download + parse replay
+    # OpenDota only sets replay_url for parsed matches, but cluster + replay_salt
+    # are always present — construct the URL directly as a fallback.
     replay_url = match_meta.get("replay_url")
+    if not replay_url:
+        cluster = match_meta.get("cluster")
+        salt = match_meta.get("replay_salt")
+        if cluster and salt:
+            replay_url = f"http://replay{cluster}.valve.net/570/{match_id_int}_{salt}.dem.bz2"
+        else:
+            # OpenDota hasn't fetched this match from Valve yet — trigger a parse and wait
+            try:
+                replay_url = await request_parse_and_wait(match_id_int)
+            except TimeoutError as exc:
+                raise HTTPException(status_code=503, detail=str(exc))
+            # Re-fetch match_meta — the parse populates lane_role, last_hits, gold_per_min, etc.
+            # The original fetch happened before the parse completed so that data was absent.
+            try:
+                match_meta = await get_match(match_id_int)
+            except Exception as exc:
+                raise HTTPException(status_code=404, detail=f"Match re-fetch failed: {exc}")
     try:
-        async with download_and_decompress(replay_url) as dem_path:
+        async with download_and_decompress(replay_url, match_id_int, force_redownload=req.force_redownload) as dem_path:
             records = parse_replay(dem_path)
     except ReplayExpiredError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -156,7 +188,9 @@ async def analyze(req: AnalyzeRequest):
         timeline=timeline,
     )
 
-    return JSONResponse(content=report.model_dump())
+    report_dict = report.model_dump()
+    write_analysis_cache(match_id_int, account_id, role, report_dict)
+    return JSONResponse(content=report_dict)
 
 
 # ---------------------------------------------------------------------------

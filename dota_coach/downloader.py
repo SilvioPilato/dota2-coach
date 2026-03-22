@@ -14,11 +14,27 @@ class ReplayExpiredError(Exception):
 
 
 @asynccontextmanager
-async def download_and_decompress(replay_url: str | None):
+async def download_and_decompress(
+    replay_url: str | None,
+    match_id: int,
+    force_redownload: bool = False,
+):
     """
-    Download .dem.bz2 from Valve CDN, decompress, yield Path to .dem file.
-    Cleans up automatically on context exit (including SIGINT).
+    Yield a Path to a decompressed .dem file, using a persistent disk cache.
+    If the .dem is already cached and within TTL, yields it directly (no download).
+    Otherwise downloads from Valve CDN, decompresses, and writes atomically to cache.
+    The cached .dem is never deleted on context exit.
     """
+    from dota_coach import cache
+
+    if force_redownload:
+        cache.invalidate_dem_cache(match_id)
+
+    if cache.is_dem_cache_fresh(match_id):
+        yield cache.get_dem_cache_path(match_id)
+        return
+
+    # No fresh cached file — must download.
     if not replay_url:
         raise ReplayExpiredError(
             "Replay not available. Valve CDN replays expire after ~7 days."
@@ -36,10 +52,11 @@ async def download_and_decompress(replay_url: str | None):
                 f"Unexpected CDN response {head.status_code} for URL: {replay_url}"
             )
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        bz2_path = tmp_path / "replay.dem.bz2"
-        dem_path = tmp_path / "replay.dem"
+    dem_cache_path = cache.get_dem_cache_path(match_id)  # also ensures CACHE_DIR exists
+    tmp_path = dem_cache_path.with_suffix(".tmp")
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        bz2_path = Path(tmp_dir) / "replay.dem.bz2"
 
         async with httpx.AsyncClient(timeout=300.0) as client:
             async with client.stream("GET", replay_url) as response:
@@ -48,8 +65,10 @@ async def download_and_decompress(replay_url: str | None):
                     async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
                         f.write(chunk)
 
-        with bz2.open(bz2_path, "rb") as f_in, open(dem_path, "wb") as f_out:
+        # Decompress into CACHE_DIR atomically: write .tmp then rename
+        with bz2.open(bz2_path, "rb") as f_in, open(tmp_path, "wb") as f_out:
             while chunk := f_in.read(4 * 1024 * 1024):
                 f_out.write(chunk)
 
-        yield dem_path
+    tmp_path.rename(dem_cache_path)
+    yield dem_cache_path

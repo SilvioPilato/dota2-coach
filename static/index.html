@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dota 2 Personal Coach</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
 
@@ -13,6 +14,8 @@
     <input type="text" id="matchId" placeholder="Match ID (e.g. 7823456789)">
     <input type="text" id="playerId" placeholder="Player ID (optional)" style="max-width:220px">
     <button id="analyzeBtn" onclick="runAnalysis()">Analyze</button>
+    <button id="reanalyzeBtn" style="display:none" onclick="runAnalysis(getCurrentRole(), {force_reanalyze: true})">Re-analyze</button>
+    <button id="redownloadBtn" style="display:none" onclick="runAnalysis(getCurrentRole(), {force_redownload: true})">Re-download replay</button>
   </div>
 
   <div class="spinner" id="spinner">Analyzing replay&hellip; this may take a minute</div>
@@ -81,6 +84,15 @@
 /* ------------------------------------------------------------------ */
 /*  State                                                              */
 /* ------------------------------------------------------------------ */
+// Configure marked: treat single newlines as <br>, keep safe HTML
+marked.use({ breaks: true });
+
+function mdToHtml(text) {
+  // Normalize "** bold**" / "**bold **" → "**bold**" (LLM sometimes adds spaces inside markers)
+  const normalized = text.replace(/\*\* +/g, '**').replace(/ +\*\*/g, '**');
+  return marked.parse(normalized);
+}
+
 let lastMatchId = '';
 let lastPlayerId = '';
 let matchReport = null;   // Full MatchReport JSON from /analyze
@@ -125,13 +137,22 @@ const ROLE_CARDS = {
 /* ------------------------------------------------------------------ */
 /*  API call                                                           */
 /* ------------------------------------------------------------------ */
-async function runAnalysis(roleOverride) {
+async function runAnalysis(roleOverride = null, flags = {}) {
   const matchId = document.getElementById('matchId').value.trim();
   const playerId = document.getElementById('playerId').value.trim();
   if (!matchId) return;
 
   lastMatchId = matchId;
   lastPlayerId = playerId;
+
+  // Check localStorage cache before hitting the server
+  if (!flags.force_reanalyze && !flags.force_redownload) {
+    const cacheKey = `dota_analysis_${matchId}_${playerId}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try { renderReport(JSON.parse(cached)); return; } catch {}
+    }
+  }
 
   // UI state: loading
   document.getElementById('report').classList.remove('visible');
@@ -142,6 +163,8 @@ async function runAnalysis(roleOverride) {
   const body = { match_id: matchId };
   if (playerId) body.player_id = playerId;
   if (roleOverride) body.role_override = Number(roleOverride);
+  if (flags.force_reanalyze)  body.force_reanalyze  = true;
+  if (flags.force_redownload) body.force_redownload = true;
 
   try {
     const res = await fetch('/analyze', {
@@ -156,6 +179,7 @@ async function runAnalysis(roleOverride) {
     }
 
     const data = await res.json();
+    localStorage.setItem(`dota_analysis_${matchId}_${playerId}`, JSON.stringify(data));
     renderReport(data);
   } catch (e) {
     showError(e.message);
@@ -163,6 +187,11 @@ async function runAnalysis(roleOverride) {
     document.getElementById('spinner').classList.remove('visible');
     document.getElementById('analyzeBtn').disabled = false;
   }
+}
+
+function getCurrentRole() {
+  const v = document.getElementById('roleOverride').value;
+  return v ? Number(v) : null;
 }
 
 function rerunWithRole() {
@@ -195,6 +224,8 @@ function renderReport(d) {
   document.getElementById('duration').textContent = `${d.duration_minutes.toFixed(0)} min`;
   document.getElementById('patchTag').textContent = d.patch || '';
   document.getElementById('roleOverride').value = '';
+  document.getElementById('reanalyzeBtn').style.display = '';
+  document.getElementById('redownloadBtn').style.display = '';
 
   // Turbo badge
   let turboEl = document.getElementById('turboBadge');
@@ -275,8 +306,8 @@ function renderMistakes(report, errors) {
     container.innerHTML = blocks.map(b =>
       `<div class="mistake-block">
         <span class="sev sev-${b.severity}">${b.severity}</span>
-        <div class="desc">${b.description}</div>
-        <div class="fix">&rarr; ${b.fix}</div>
+        <div class="desc">${marked.parseInline(b.description)}</div>
+        <div class="fix">&rarr; ${marked.parseInline(b.fix)}</div>
       </div>`
     ).join('');
   } else if (errors && errors.length) {
@@ -284,8 +315,8 @@ function renderMistakes(report, errors) {
     container.innerHTML = errors.slice(0, 3).map(e =>
       `<div class="mistake-block">
         <span class="sev sev-${e.severity}">${e.severity}</span>
-        <div class="desc">${e.description}</div>
-        ${e.context ? `<div class="fix">&rarr; ${e.context}</div>` : ''}
+        <div class="desc">${marked.parseInline(e.description)}</div>
+        ${e.context ? `<div class="fix">&rarr; ${marked.parseInline(e.context)}</div>` : ''}
       </div>`
     ).join('');
   } else {
@@ -320,7 +351,11 @@ function extractPriorityFocus(text) {
 function appendChatBubble(role, text) {
   const el = document.createElement('div');
   el.className = 'chat-bubble chat-' + role;
-  el.textContent = text;
+  if (role === 'assistant' && text) {
+    el.innerHTML = mdToHtml(text);
+  } else {
+    el.textContent = text;
+  }
   document.getElementById('chatMessages').appendChild(el);
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
   return el;
@@ -374,13 +409,13 @@ async function sendChat() {
         const payload = line.slice(6);
         if (payload === '[DONE]') continue;
         fullText += payload;
-        bubble.textContent = fullText;
+        bubble.innerHTML = mdToHtml(fullText);
       }
       bubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   } catch (e) {
     fullText = fullText || '(Error: ' + e.message + ')';
-    bubble.textContent = fullText;
+    bubble.innerHTML = marked.parse(fullText);
   }
 
   bubble.classList.remove('chat-streaming');
