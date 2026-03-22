@@ -4,13 +4,16 @@ AI-powered coaching tool that analyzes Dota 2 replays and delivers role-aware, p
 
 ## Features
 
-- **All 5 roles** — auto-detected via OpenDota `lane_role`, with manual override
+- **All 5 roles** — auto-detected via [Stratz GraphQL API](https://stratz.com/api) (accurate pos 1–5), falling back to OpenDota GPM-ranking heuristic when no key is set
 - **Percentile-based error detection** — severity from global OpenDota benchmarks (critical < 20th, high < 35th, medium < 45th)
 - **Role-aware metrics** — each position observes different KPIs (GPM/LH for cores, wards/stacks/healing for supports)
 - **Turbo mode** — detected automatically (`game_mode == 23`), uses absolute metrics with turbo-calibrated reference values
 - **Patch context** — current item costs and hero base stats injected into prompts via `dotaconstants`
+- **Replay cache** — decompressed `.dem` files cached to `~/.dota_coach/cache/` (7-day TTL); repeat analyses skip the ~100–500 MB download
+- **Analysis cache** — full coaching results cached by `match_id + account_id + role`; identical requests return instantly without re-running the LLM
+- **Browser persistence** — last result stored in `localStorage`; re-opening the page and re-submitting renders instantly without a server round-trip
 - **Follow-up chat** — ask the coach questions about your match via streaming SSE
-- **Web UI** — dark-themed single-page app with metric cards, benchmark bars, coaching report, and chat panel
+- **Web UI** — dark-themed single-page app with metric cards, benchmark bars, coaching report, chat panel, and Re-analyze / Re-download replay buttons
 - **CLI** — terminal interface with Rich formatting
 
 ## Architecture
@@ -22,7 +25,9 @@ Browser / CLI
 FastAPI backend (api.py)
     │
     ├─► OpenDota API        → match metadata + replay URL
-    ├─► Valve CDN           → .dem.bz2 replay file
+    ├─► Stratz GraphQL API  → accurate pos 1–5 role (optional)
+    ├─► Analysis Cache      → short-circuit on cache hit (match+player+role)
+    ├─► Valve CDN           → .dem.bz2 replay file (or .dem disk cache)
     ├─► odota parser        → NDJSON event log (localhost:5600)
     ├─► Extractor           → MatchMetrics (typed Pydantic model)
     ├─► Role Detector       → RoleProfile (pos 1–5)
@@ -52,16 +57,8 @@ Create a `.env` file in the project root (or set these as environment variables)
 |----------|---------|-------------|
 | `LLM_MODEL` | `anthropic/claude-sonnet-4-6` | LiteLLM model identifier |
 | `ANTHROPIC_API_KEY` | — | API key (or equivalent for your provider) |
+| `STRATZ_API_KEY` | — | Optional. Enables accurate pos 1–5 role detection via [Stratz](https://stratz.com/api). Falls back to GPM-ranking heuristic if unset. |
 | `DOTA_COACH_TOKEN_BUDGET` | `800` | Max tokens for LLM user message |
-| `DOTA_COACH_LH_AT_10_MIN` | `45` | Min last hits at 10 min (v1 threshold) |
-| `DOTA_COACH_DEATH_LIMIT` | `2` | Max deaths before 10 min |
-| `DOTA_COACH_EARLY_DEATH_MINUTES` | `5.0` | Early death cutoff (minutes) |
-| `DOTA_COACH_SLOW_CORE_ITEM_MINUTES` | `18.0` | Slow first core item threshold |
-| `DOTA_COACH_NW_DEFICIT_AT_10` | `1000` | Net worth deficit threshold at 10 min |
-| `DOTA_COACH_NW_DEFICIT_AT_20` | `2500` | Net worth deficit threshold at 20 min |
-| `DOTA_COACH_PASSIVE_LANING_PCT` | `0.70` | Own-half positioning fraction |
-| `DOTA_COACH_WARD_PURCHASE_LIMIT` | `2` | Ward purchases to flag (carry) |
-| `DOTA_COACH_TF_PARTICIPATION_FLOOR` | `0.40` | Min teamfight participation |
 
 ## Usage
 
@@ -73,7 +70,12 @@ uvicorn dota_coach.api:app --reload
 
 Open [http://localhost:8000](http://localhost:8000), enter a Match ID and optionally a Player ID, then click **Analyze**.
 
-After the coaching report loads, use the chat panel below to ask follow-up questions.
+After the coaching report loads:
+- Use the **chat panel** below to ask follow-up questions
+- Click **Re-analyze** to bypass the analysis cache and re-run the full pipeline (keeps the cached `.dem`)
+- Click **Re-download replay** to delete the cached `.dem` and re-download from Valve CDN (implies re-analysis)
+
+Results are stored in `localStorage` — re-submitting the same match+player pair renders instantly from the browser cache.
 
 ### CLI
 
@@ -101,9 +103,14 @@ Full analysis pipeline — returns a `MatchReport` JSON.
 {
   "match_id": "7823456789",
   "player_id": "12345678",
-  "role_override": 1
+  "role_override": 1,
+  "force_reanalyze": false,
+  "force_redownload": false
 }
 ```
+
+- `force_reanalyze` — skip analysis cache; re-run full pipeline (keeps cached `.dem`)
+- `force_redownload` — delete cached `.dem` and re-download; implies `force_reanalyze`
 
 #### `POST /chat`
 
@@ -125,18 +132,20 @@ Streaming follow-up questions (Server-Sent Events).
 ```
 dota_coach/
 ├── api.py          # FastAPI backend — POST /analyze, POST /chat, static serving
+├── cache.py        # Disk cache helpers — analysis JSON + .dem file (7-day TTL)
 ├── cli.py          # Typer CLI — analyze, recent commands
 ├── coach.py        # LiteLLM calls — get_coaching(), stream_llm()
 ├── config.py       # Environment-based configuration
 ├── detector.py     # Error detection — percentile-based + absolute rules
-├── downloader.py   # Replay download from Valve CDN
+├── downloader.py   # Replay download from Valve CDN with persistent .dem cache
 ├── enricher.py     # Benchmark + patch data fetcher with disk cache
 ├── extractor.py    # Parser NDJSON → MatchMetrics, build_timeline()
 ├── models.py       # Pydantic models — MatchMetrics, MatchReport, ChatRequest, etc.
 ├── opendota.py     # OpenDota API client — get_match(), get_benchmarks()
 ├── parser.py       # odota parser sidecar client
 ├── prompt.py       # LLM prompt builder — role-aware, turbo-aware, chat messages
-└── role.py         # Role detection + ROLE_PROFILES (pos 1–5)
+├── role.py         # Role detection + ROLE_PROFILES (pos 1–5)
+└── stratz.py       # Stratz GraphQL client — get_match_positions() for pos 1–5 roles
 
 static/
 ├── index.html      # Single-page frontend with chat panel
@@ -148,13 +157,14 @@ tests/
 ├── test_enricher.py    # Enricher with mocked HTTP + caching (14 tests)
 ├── test_extractor.py   # Metric extraction from parser records (25 tests)
 ├── test_prompt.py      # Prompt rendering for all roles (28 tests)
-└── test_role.py        # Role detection + profiles (27 tests)
+├── test_role.py        # Role detection + profiles (27 tests)
+└── test_stratz.py      # Stratz client — positions, fallbacks, error cases (8 tests)
 ```
 
 ## Testing
 
 ```bash
-# Run all 151 tests
+# Run all 159 tests
 pytest tests/ -v
 
 # Run a specific test file
