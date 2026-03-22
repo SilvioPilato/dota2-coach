@@ -1033,3 +1033,129 @@ README.md
 **Entry point:** `uvicorn api:app --reload --port 8000` then open `http://localhost:8000`
 
 **CLI still supported:** `python -m dota_coach.cli analyze --match 7812345678` for headless/scripted use.
+
+---
+
+## Appendix C — v3 Feature: OpenDota Fallback for Expired Replays
+
+### Problem
+
+Valve CDN replays expire after ~7 days. Any match older than that returns a 404/403 on the
+`.dem.bz2` URL, causing the pipeline to abort with a `ReplayExpiredError` before any analysis
+can be done.
+
+### Proposed Solution
+
+When a replay is unavailable, fall back to OpenDota's own parsed match data. OpenDota stores
+per-player per-minute arrays (`gold_t`, `lh_t`, `xp_t`) and end-game stats for all matches it
+has parsed — independently of Valve CDN availability. This allows ~80% fidelity analysis on
+old matches.
+
+### Metric Coverage
+
+| Metric | Source (fallback) | Fidelity |
+| --- | --- | --- |
+| GPM / XPM | `gold_per_min`, `xp_per_min` | Full |
+| LH @ 10 | `lh_t[10]` | Full (if OpenDota parsed) |
+| NW @ 10 / NW @ 20 | `gold_t[10]`, `gold_t[20]` | Full (if parsed) |
+| Ward placements | `obs_placed + sen_placed` | Full |
+| Stacks created | `camps_stacked` | Full |
+| Hero healing | `hero_healing` | Full |
+| TF participation | `teamfight_participation` | Full |
+| Result / duration | `win`, `duration` | Full |
+| Deaths before 10 | ✗ only total deaths available | Degraded |
+| First core item time | ✗ not reliably available | Missing |
+| Laning heatmap | ✗ positional data not in API | Missing |
+| Match timeline (chat) | ✗ no event log without `.dem` | Missing |
+
+### Implementation Plan
+
+1. **New function `extract_metrics_from_opendota(our_meta, match_meta)`** in `extractor.py`
+   — reads directly from the player dict in `match_meta["players"]`, using `lh_t`, `gold_t`,
+   `xp_t` arrays for laning-phase snapshots.
+
+2. **Fallback in `api.py`** — catch `ReplayExpiredError` in the `/analyze` handler and retry
+   with the OpenDota extractor instead of aborting. Return the report with a degraded-mode
+   warning flag.
+
+3. **`MatchReport` gets a `degraded` field** — `bool`, defaults to `False`. Set to `True` when
+   the OpenDota fallback was used.
+
+4. **Frontend banner** — show a non-blocking yellow notice when `degraded === true`:
+   *"Replay expired — analysis based on OpenDota data. Some laning metrics may be less precise."*
+
+5. **Graceful metric gaps** — metrics unavailable in fallback mode (`deaths_before_10`,
+   `first_core_item_minute`, `laning_heatmap_own_half_pct`, `timeline`) are set to `None`/`""`.
+   The detector and prompt builder already handle `None` for optional fields.
+
+### Non-Goals for this Feature
+
+- No request to OpenDota to trigger a re-parse of an expired match (separate concern).
+- No caching of the OpenDota fallback data to disk.
+- CLI path not updated (fallback is web-UI only for v3).
+
+---
+
+## 13. Replay & Analysis Caching
+
+**Spec:** `docs/superpowers/specs/2026-03-22-replay-caching-design.md`
+
+### 13.1 Problem
+
+Every call to `/analyze` re-downloads the replay (~100–500 MB), re-parses it (CPU-intensive), and re-calls the LLM, even for repeated requests on the same match. A page refresh also loses the rendered result.
+
+### 13.2 Cache layers
+
+Three independent layers, each bypassable by the user:
+
+| Layer | Storage | Key | TTL |
+| --- | --- | --- | --- |
+| Decompressed `.dem` file | `~/.dota_coach/cache/replay_{match_id}.dem` | match_id | 7 days |
+| Full analysis result (JSON) | `~/.dota_coach/cache/analysis_{match_id}_{account_id}_{role}.json` | match_id + account_id + role (all integers) | 7 days |
+| Last rendered result | Browser `localStorage` key `dota_analysis_{match_id}_{player_id}` | match_id + player_id | Until user clears storage |
+
+The role in the analysis cache key is the **resolved integer role (1–5)**, so re-analyzing with a role override always writes a separate cache entry.
+
+### 13.3 New module: `dota_coach/cache.py`
+
+Owns all cache file operations. Five functions:
+
+- `read_analysis_cache(match_id, account_id, role) → dict | None` — returns `None` on miss, expiry, or corrupt JSON (logs `WARNING` on `JSONDecodeError`)
+- `write_analysis_cache(match_id, account_id, role, data)` — atomic `.tmp → rename`; logs `WARNING` on serialisation failure
+- `get_dem_cache_path(match_id) → Path`
+- `is_dem_cache_fresh(match_id) → bool`
+- `invalidate_dem_cache(match_id)` — no-op if absent
+
+Both write functions call `mkdir(parents=True, exist_ok=True)` on `CACHE_DIR` before use.
+
+### 13.4 `downloader.py` changes
+
+New signature: `download_and_decompress(replay_url, match_id, force_redownload=False)`
+
+- Cache hit → yield cached `.dem` directly (HEAD check skipped)
+- Cache miss → download `.bz2` to a `TemporaryDirectory` (auto-cleaned), decompress atomically to `CACHE_DIR`, yield
+- `force_redownload=True` → calls `invalidate_dem_cache` first, then re-downloads
+
+### 13.5 `api.py` changes
+
+`AnalyzeRequest` gains two flags:
+
+```python
+force_reanalyze: bool = False    # skip analysis cache, re-run LLM (keep .dem)
+force_redownload: bool = False   # delete .dem and re-download (implies force_reanalyze)
+```
+
+OpenDota fetch + role detection (steps 1–4) always run. After role is resolved, the analysis cache is checked. Steps 5–12 (download, parse, LLM) are skipped on a cache hit.
+
+### 13.6 Frontend changes
+
+- **Three buttons**: *Analyze* (always visible), *Re-analyze* and *Re-download replay* (visible only when a result is rendered)
+- On submit: check `localStorage` first and render immediately if a cached result is present
+- On successful response: write result to `localStorage`
+
+### 13.7 Non-Goals
+
+- Cache eviction UI (manual deletion via filesystem)
+- Multi-user / shared cache
+- Redis or any external cache store
+- Auto-clearing `localStorage` when server cache is invalidated
