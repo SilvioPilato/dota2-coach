@@ -66,6 +66,7 @@ class MatchMetrics(BaseModel):
     stun_time: Optional[float] = None
     rune_control_pct: Optional[float] = None
     tower_damage: Optional[int] = None
+    initiation_rate: Optional[float] = None
 
     # Game mode
     turbo: bool = False

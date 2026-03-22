@@ -224,6 +224,21 @@ def detect_errors(
             threshold="< 1500 tower damage is low for a mid hero",
         ))
 
+    # Initiation rate rule (pos 3): rarely initiating fights
+    if (
+        role_profile is not None
+        and "initiation_rate" in role_profile.observed_metrics
+        and metrics.initiation_rate is not None
+        and metrics.initiation_rate < 0.30
+    ):
+        errors.append(DetectedError(
+            category="Low initiation rate",
+            description="Initiated fewer than 30% of participated teamfights — offlaner should lead engagements",
+            severity="medium",
+            metric_value=f"{metrics.initiation_rate:.0%} of fights initiated",
+            threshold="< 30% initiation rate is passive for an offlaner",
+        ))
+
     # ===================================================================
     # v1 ABSOLUTE RULES (only when no enrichment provided — backward compat)
     # ===================================================================

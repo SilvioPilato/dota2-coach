@@ -250,6 +250,36 @@ def extract_metrics(
     # tower_damage: total damage dealt to buildings, from match_meta
     tower_damage_val: int | None = our_meta.get("tower_damage")
 
+    # initiation_rate: fraction of participated fights where our player dealt the first hero damage
+    # Uses match_meta teamfights[] for fight windows + parser damage records for timing
+    teamfights_meta = match_meta.get("teamfights") or []
+    fights_participated = 0
+    fights_initiated = 0
+    for fight in teamfights_meta:
+        start_t = fight.get("start", 0)
+        end_t = fight.get("end", start_t)
+        player_entries = fight.get("players") or []
+        if our_parser_slot >= len(player_entries):
+            continue
+        # Only count fights where our player dealt damage (active participant)
+        if not (player_entries[our_parser_slot] or {}).get("damage", 0):
+            continue
+        fights_participated += 1
+        fight_damage = [
+            r for r in records
+            if r.get("type") == "DOTA_COMBATLOG_DAMAGE"
+            and start_t <= r.get("time", -1) <= end_t
+            and r.get("targethero") is True
+            and not r.get("targetillusion")
+        ]
+        if fight_damage:
+            fight_damage.sort(key=lambda r: r["time"])
+            if fight_damage[0].get("attackername", "") == our_npc_name:
+                fights_initiated += 1
+    initiation_rate_val: float | None = (
+        fights_initiated / fights_participated if fights_participated > 0 else None
+    )
+
     # deward_pct: fraction of enemy wards killed by our player
     # obs/sen records track ward placements; obs_left/sen_left track ward deaths
     # We count enemy ward placements (slot != our_parser_slot) and compare to
@@ -300,6 +330,7 @@ def extract_metrics(
         stun_time=stun_time_val,
         rune_control_pct=rune_control_pct_val,
         tower_damage=tower_damage_val,
+        initiation_rate=initiation_rate_val,
         turbo=match_meta.get("game_mode") == 23,
     )
 

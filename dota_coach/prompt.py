@@ -175,6 +175,8 @@ def build_user_message(
         lines.append(f"- Stacks created: {stacks}")
         if metrics.stun_time is not None:
             lines.append(f"- Stun time applied: {metrics.stun_time:.1f}s")
+        if metrics.initiation_rate is not None:
+            lines.append(f"- Initiation rate: {metrics.initiation_rate:.0%} of fights")
 
     elif role in (4, 5):
         # Pos 4/5: ward placements, deward_pct, stacks, hero healing, stun time
