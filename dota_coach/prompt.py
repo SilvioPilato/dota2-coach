@@ -312,6 +312,9 @@ def build_chat_messages(request: ChatRequest) -> list[dict]:
     if len(history_msgs) > _MAX_HISTORY:
         history_msgs = history_msgs[-_KEEP_TAIL:]
 
-    user_msg: dict = {"role": "user", "content": request.user_message}
+    user_content = request.user_message
+    if request.quote:
+        user_content = f"[Referenced event: {request.quote}]\n\n{user_content}"
+    user_msg: dict = {"role": "user", "content": user_content}
 
     return [system_msg, assistant_msg, *history_msgs, user_msg]

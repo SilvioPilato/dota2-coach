@@ -514,6 +514,7 @@ async function sendChat() {
     match_context: matchReport,
     history: chatHistory.slice(0, -1), // history before this message
     user_message: msg,
+    quote: window.currentQuote || null,
   };
 
   let fullText = '';
