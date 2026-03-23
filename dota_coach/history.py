@@ -51,10 +51,19 @@ def _db() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def save_match_report(match_id: int, account_id: int, role: int, report: dict) -> None:
+def save_match_report(
+    match_id: int, account_id: int, role: int, report: dict, analyzed_at: str | None = None
+) -> None:
     """Upsert a MatchReport dict to match_history.
 
     Silently logs and swallows errors so a DB failure never breaks the API.
+
+    Args:
+        match_id: The match ID
+        account_id: The account ID
+        role: The role number
+        report: The report dict to save
+        analyzed_at: Optional explicit timestamp (ISO format). If None, uses current time.
     """
     try:
         serialised = json.dumps(report)
@@ -63,16 +72,28 @@ def save_match_report(match_id: int, account_id: int, role: int, report: dict) -
         return
     try:
         with _db() as conn:
-            conn.execute(
-                """
-                INSERT INTO match_history (match_id, account_id, role, report_json)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (match_id, account_id, role)
-                DO UPDATE SET report_json = excluded.report_json,
-                              analyzed_at = datetime('now')
-                """,
-                (match_id, account_id, role, serialised),
-            )
+            if analyzed_at is not None:
+                conn.execute(
+                    """
+                    INSERT INTO match_history (match_id, account_id, role, report_json, analyzed_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (match_id, account_id, role)
+                    DO UPDATE SET report_json = excluded.report_json,
+                                  analyzed_at = excluded.analyzed_at
+                    """,
+                    (match_id, account_id, role, serialised, analyzed_at),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO match_history (match_id, account_id, role, report_json)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (match_id, account_id, role)
+                    DO UPDATE SET report_json = excluded.report_json,
+                                  analyzed_at = datetime('now')
+                    """,
+                    (match_id, account_id, role, serialised),
+                )
             conn.commit()
     except Exception as exc:
         logger.warning("Failed to save match %s to history DB: %s", match_id, exc)

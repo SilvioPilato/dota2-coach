@@ -1,6 +1,7 @@
 """Tests for dota_coach.history — SQLite match history persistence."""
 from __future__ import annotations
 
+import gc
 import json
 import tempfile
 from pathlib import Path
@@ -9,7 +10,6 @@ from unittest import mock
 import pytest
 
 from dota_coach.history import (
-    DB_PATH,
     get_analyzed_ids,
     get_match_history,
     get_stored_report,
@@ -35,7 +35,6 @@ def temp_db():
             _ensure_db()
             yield temp_path
             # Force garbage collection to close DB connections
-            import gc
             gc.collect()
 
 
@@ -211,17 +210,15 @@ class TestGetMatchHistory:
 
     def test_newest_first(self, temp_db):
         """Test that results are ordered by analyzed_at DESC."""
-        import time
-
         report1 = _make_report(hero="Hero1")
         report2 = _make_report(hero="Hero2")
 
-        save_match_report(100, 123, 1, report1)
-        time.sleep(1.1)  # Ensure different timestamps (SQLite datetime('now') has second precision)
-        save_match_report(101, 123, 1, report2)
+        # Use explicit timestamps to control ordering without sleeping
+        save_match_report(100, 123, 1, report1, analyzed_at="2024-01-01 10:00:00")
+        save_match_report(101, 123, 1, report2, analyzed_at="2024-01-01 10:00:01")
 
         result = get_match_history(123, limit=20)
-        # The second saved should be first (newest)
+        # The second saved (newer timestamp) should be first
         assert result[0]["hero"] == "Hero2"
         assert result[1]["hero"] == "Hero1"
 
