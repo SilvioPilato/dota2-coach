@@ -20,7 +20,8 @@ AI-powered coaching tool that analyzes Dota 2 replays and delivers role-aware, p
 - **Match history** — every analysis is persisted to `~/.dota_coach/history.db` (SQLite); accessible via `GET /history/{account_id}`
 - **Browser persistence** — last result stored in `localStorage`; re-opening the page and re-submitting renders instantly without a server round-trip
 - **Follow-up chat** — ask the coach questions about your match via streaming SSE
-- **Web UI** — dark-themed single-page app with metric cards, benchmark bars, coaching report, chat panel, and Re-analyze / Re-download replay buttons
+- **History sidebar** — recent matches displayed in a collapsible sidebar; click any entry to reload its analysis instantly
+- **Web UI** — dark-themed three-column layout (history sidebar | report pane | chat pane), each panel scrolling independently, with metric cards, benchmark bars, coaching report, and Re-analyze / Re-download replay buttons
 - **CLI** — terminal interface with Rich formatting
 
 ## Architecture
