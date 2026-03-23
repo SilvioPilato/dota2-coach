@@ -215,6 +215,7 @@ async function runAnalysis(roleOverride = null, flags = {}) {
       localStorage.setItem('dota_coach_account_id', playerId);
       document.getElementById('lastAccountId').textContent = playerId;
       document.getElementById('lastAccountLabel').style.display = '';
+      loadSidebar(playerId);
     }
   } catch (e) {
     showError(e.message);
@@ -575,12 +576,47 @@ async function sendChat() {
   document.getElementById('chatInput').focus();
 }
 
+async function loadSidebar(accountId) {
+  if (!accountId) return;
+
+  // Show loading state
+  const list = document.getElementById('sidebarList');
+  const emptyEl = document.getElementById('sidebarEmpty');
+  const errorEl = document.getElementById('sidebarError');
+  emptyEl.style.display = 'none';
+  errorEl.style.display = 'none';
+
+  // Remove old rows (keep the empty/error placeholders)
+  Array.from(list.children).forEach(c => {
+    if (!c.id || (c.id !== 'sidebarEmpty' && c.id !== 'sidebarError')) c.remove();
+  });
+
+  // Insert loading indicator
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'sidebar-loading';
+  loadingEl.id = 'sidebarLoading';
+  loadingEl.textContent = 'Loading matches…';
+  list.insertBefore(loadingEl, emptyEl);
+
+  try {
+    const res = await fetch(`/recent-matches/${accountId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const matches = await res.json();
+    loadingEl.remove();
+    renderSidebar(matches);
+  } catch (e) {
+    loadingEl.remove();
+    showSidebarError();
+  }
+}
+
 function loadSavedAccount() {
   const saved = localStorage.getItem('dota_coach_account_id');
   if (saved) {
     document.getElementById('playerId').value = saved;
     document.getElementById('lastAccountId').textContent = saved;
     document.getElementById('lastAccountLabel').style.display = '';
+    loadSidebar(saved);
   }
 }
 

@@ -149,6 +149,8 @@ a { color: var(--accent-blue); }
 .sidebar-list { flex: 1; overflow-y: auto; }
 .sidebar-empty, .sidebar-error { padding: 16px; font-size: 13px; color: var(--text-muted); text-align: center; }
 .sidebar-error { color: var(--loss); }
+.sidebar-loading { padding: 16px; font-size: 13px; color: var(--text-muted); text-align: center; }
+.sidebar-loading::before { content: ''; display: block; width: 20px; height: 20px; margin: 0 auto 8px; border: 2px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin .8s linear infinite; }
 
 /* Sidebar rows */
 .sidebar-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border); }
