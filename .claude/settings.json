@@ -31,7 +31,25 @@
       "Bash(wmic process:*)",
       "Bash(tasklist /v)",
       "Skill(beads:beads)",
-      "Skill(beads:beads:*)"
+      "Skill(beads:beads:*)",
+      "Read(//c/Users/Silvio/.config/superpowers/worktrees/dota-analysis/v3-sidebar-chat/**)",
+      "Bash(python -m pytest tests/ -q)",
+      "Read(//c/Users/Silvio/.claude/plugins/cache/superpowers-dev/superpowers/5.0.5/skills/subagent-driven-development/**)",
+      "Bash(python -m pytest tests/test_history.py -v)",
+      "Bash(python -m pytest tests/test_history.py --co -q)",
+      "Bash(python -m pytest tests/test_history.py::TestGetAnalyzedIds -v --tb=short)",
+      "Bash(python -m pytest tests/test_history.py::TestGetMatchHistory::test_newest_first -v)",
+      "Bash(python -m pytest tests/ -q --tb=line)",
+      "Bash(python -m pytest tests/test_history.py -q)",
+      "Bash(bd update:*)",
+      "Bash(python -c \"from sse_starlette.sse import EventSourceResponse; print\\(''OK''\\)\")",
+      "Bash(python -c \"from dota_coach.api import app; print\\(''OK''\\)\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat\\dota_coach",
+      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat\\tests",
+      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat\\static",
+      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat"
     ]
   }
 }
