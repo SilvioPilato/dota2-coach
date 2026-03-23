@@ -82,6 +82,10 @@
     <h2 class="section-title" id="chatTitle">Ask your Coach</h2>
     <div class="chat-panel" id="chatPanel">
       <div class="chat-messages" id="chatMessages"></div>
+      <div id="quotePreview" style="display:none" class="quote-preview">
+        📌 <span id="quoteText"></span>
+        <button class="quote-dismiss" onclick="clearQuote()">×</button>
+      </div>
       <div class="chat-input-bar">
         <textarea id="chatInput" rows="1" placeholder="Ask a follow-up question…"></textarea>
         <button id="chatSendBtn" onclick="sendChat()">Send</button>
@@ -106,6 +110,7 @@ let lastMatchId = '';
 let lastPlayerId = '';
 let matchReport = null;   // Full MatchReport JSON from /analyze
 let chatHistory = [];     // Array of {role, content} turns
+window.currentQuote = null;
 
 /* ------------------------------------------------------------------ */
 /*  Role-adaptive metric card definitions                              */
@@ -429,6 +434,17 @@ function extractPriorityFocus(text) {
 /* ------------------------------------------------------------------ */
 /*  Chat panel                                                         */
 /* ------------------------------------------------------------------ */
+function setQuote(eventText) {
+  window.currentQuote = eventText;
+  document.getElementById('quoteText').textContent = eventText;
+  document.getElementById('quotePreview').style.display = '';
+}
+
+function clearQuote() {
+  window.currentQuote = null;
+  document.getElementById('quotePreview').style.display = 'none';
+}
+
 function appendChatBubble(role, text) {
   const el = document.createElement('div');
   el.className = 'chat-bubble chat-' + role;
@@ -469,6 +485,7 @@ async function sendChat() {
 
   input.value = '';
   input.style.height = 'auto';  // reset height after clearing
+  clearQuote();
   document.getElementById('chatSendBtn').disabled = true;
   document.getElementById('chatInput').disabled = true;
 

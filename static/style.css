@@ -139,3 +139,8 @@ a { color: var(--accent-blue); }
 .chat-input-bar button { padding: 10px 22px; border: none; border-radius: var(--radius); background: var(--accent-blue); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
 .chat-input-bar button:hover { opacity: .9; }
 .chat-input-bar button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Quote preview */
+.quote-preview { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--bg-input); border-top: 1px solid var(--border); font-size: 13px; color: var(--text-muted); }
+.quote-dismiss { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 0 4px; line-height: 1; }
+.quote-dismiss:hover { color: var(--text); }
