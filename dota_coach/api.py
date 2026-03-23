@@ -345,6 +345,23 @@ async def match_history(account_id: int, limit: int = 20):
     return JSONResponse(content=records)
 
 
+@app.get("/report/{account_id}/{match_id}")
+async def get_report(account_id: int, match_id: int):
+    """Return the stored MatchReport for a specific match (any role)."""
+    from dota_coach.history import get_match_history
+
+    _STEAM64_BASE = 76561197960265728
+    if account_id > _STEAM64_BASE:
+        account_id = account_id - _STEAM64_BASE
+
+    # get_match_history returns newest-first; find the one matching match_id
+    all_reports = get_match_history(account_id, limit=100)
+    for r in all_reports:
+        if r.get("match_id") == match_id:
+            return JSONResponse(content=r)
+    raise HTTPException(status_code=404, detail="Report not found")
+
+
 # ---------------------------------------------------------------------------
 # GET /recent-matches/{account_id}
 # ---------------------------------------------------------------------------
