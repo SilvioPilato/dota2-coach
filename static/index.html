@@ -669,6 +669,34 @@ function renderSidebar(matches) {
       });
     }
 
+    if (analyzed && !expired) {
+      row.addEventListener('click', function(e) {
+        // Don't trigger if clicking the action button
+        if (e.target.classList.contains('sidebar-action')) return;
+        const pid = lastPlayerId || localStorage.getItem('dota_coach_account_id') || '';
+        const cacheKey = `dota_analysis_${m.match_id}_${pid}`;
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          try { renderReport(JSON.parse(cached)); } catch {}
+        }
+      });
+    }
+
+    if (!expired) {
+      const btn = row.querySelector('.sidebar-action');
+      if (btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          document.getElementById('matchId').value = m.match_id;
+          if (analyzed) {
+            runAnalysis(null, { force_reanalyze: true });
+          } else {
+            runAnalysis();
+          }
+        });
+      }
+    }
+
     list.appendChild(row);
   });
 }
