@@ -73,8 +73,7 @@
     <div class="chat-panel" id="chatPanel">
       <div class="chat-messages" id="chatMessages"></div>
       <div class="chat-input-bar">
-        <input type="text" id="chatInput" placeholder="Ask a follow-up question…"
-               onkeydown="if(event.key==='Enter')sendChat()">
+        <textarea id="chatInput" rows="1" placeholder="Ask a follow-up question…"></textarea>
         <button id="chatSendBtn" onclick="sendChat()">Send</button>
       </div>
     </div>
@@ -373,13 +372,35 @@ function appendChatBubble(role, text) {
   return el;
 }
 
+function initChatInput() {
+  const ta = document.getElementById('chatInput');
+
+  // Auto-resize: 1 row default, max 4 rows
+  ta.addEventListener('input', function() {
+    this.style.height = 'auto';
+    const lineHeight = parseInt(getComputedStyle(this).lineHeight);
+    const maxHeight = lineHeight * 4;
+    this.style.height = Math.min(this.scrollHeight, maxHeight) + 'px';
+  });
+
+  // Enter sends, Shift+Enter inserts newline
+  ta.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChat();
+    }
+  });
+}
+
 async function sendChat() {
   const input = document.getElementById('chatInput');
   const msg = input.value.trim();
   if (!msg || !matchReport) return;
 
   input.value = '';
+  input.style.height = 'auto';  // reset height after clearing
   document.getElementById('chatSendBtn').disabled = true;
+  document.getElementById('chatInput').disabled = true;
 
   // User bubble
   appendChatBubble('user', msg);
@@ -434,8 +455,12 @@ async function sendChat() {
   bubble.classList.remove('chat-streaming');
   chatHistory.push({ role: 'assistant', content: fullText });
   document.getElementById('chatSendBtn').disabled = false;
+  document.getElementById('chatInput').disabled = false;
   document.getElementById('chatInput').focus();
 }
+
+// Initialize chat input textarea behavior
+initChatInput();
 </script>
 
 </body>
