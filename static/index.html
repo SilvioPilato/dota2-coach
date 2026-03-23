@@ -370,6 +370,19 @@ function renderTimeline(timelineStr) {
     cite.textContent = '→';
     cite.dataset.event = desc;
 
+    cite.addEventListener('click', function() {
+      const eventText = this.dataset.event;
+      setQuote(eventText);
+
+      // Highlight the row for 2s
+      const row = this.closest('.timeline-row');
+      row.classList.add('timeline-row-cited');
+      setTimeout(() => row.classList.remove('timeline-row-cited'), 2000);
+
+      // Focus textarea
+      document.getElementById('chatInput').focus();
+    });
+
     row.appendChild(tsSpan);
     row.appendChild(eventSpan);
     row.appendChild(cite);

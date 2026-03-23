@@ -98,6 +98,7 @@ a { color: var(--accent-blue); }
 .timeline-death { color: var(--loss); }
 .timeline-cite { margin-left: auto; opacity: 0; padding: 2px 8px; border: none; border-radius: 4px; background: var(--bg-input); color: var(--accent-blue); font-size: 13px; cursor: pointer; transition: opacity .15s; }
 .timeline-row:hover .timeline-cite { opacity: 1; }
+.timeline-row-cited { background: var(--bg-input); transition: background 2s ease; }
 
 /* Section titles */
 .section-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
