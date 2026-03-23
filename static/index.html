@@ -68,6 +68,12 @@
       <p id="priorityText"></p>
     </div>
 
+    <!-- Match timeline -->
+    <div id="timelineSection" style="display:none">
+      <h2 class="section-title">Match Timeline</h2>
+      <div id="timelineRows" class="timeline"></div>
+    </div>
+
     <!-- Chat panel -->
     <h2 class="section-title" id="chatTitle">Ask your Coach</h2>
     <div class="chat-panel" id="chatPanel">
@@ -301,7 +307,61 @@ function renderReport(d) {
     pf.style.display = 'none';
   }
 
+  // Timeline
+  renderTimeline(d.timeline || '');
+
   document.getElementById('report').classList.add('visible');
+}
+
+function renderTimeline(timelineStr) {
+  const section = document.getElementById('timelineSection');
+  const container = document.getElementById('timelineRows');
+
+  if (!timelineStr) {
+    section.style.display = 'none';
+    return;
+  }
+
+  const lines = timelineStr.split('\n');
+  // Skip the first line (header like "MATCH TIMELINE (Anti-Mage):")
+  const eventLines = lines.slice(1).filter(l => l.trim());
+
+  if (!eventLines.length) {
+    section.style.display = 'none';
+    return;
+  }
+
+  container.innerHTML = '';
+  for (const line of eventLines) {
+    // Parse "MM:SS — description"
+    const match = line.match(/^(\d{2}:\d{2})\s*[—-]+\s*(.+)$/);
+    if (!match) continue;
+
+    const [, ts, desc] = match;
+
+    const row = document.createElement('div');
+    row.className = 'timeline-row';
+
+    const tsSpan = document.createElement('span');
+    tsSpan.className = 'timeline-ts';
+    tsSpan.textContent = ts;
+
+    const eventSpan = document.createElement('span');
+    eventSpan.className = 'timeline-event' + (desc.includes('you died') ? ' timeline-death' : '');
+    eventSpan.textContent = desc;
+
+    const cite = document.createElement('button');
+    cite.className = 'timeline-cite';
+    cite.textContent = '→';
+    cite.dataset.event = desc;
+
+    row.appendChild(tsSpan);
+    row.appendChild(eventSpan);
+    row.appendChild(cite);
+    container.appendChild(row);
+  }
+
+  section.style.display = '';
 }
 
 function fmtBenchName(s) {

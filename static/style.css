@@ -88,6 +88,17 @@ a { color: var(--accent-blue); }
 .priority-focus { background: #0d2137; border: 2px solid var(--accent-blue); border-radius: var(--radius); padding: 18px 22px; margin-top: 20px; }
 .priority-focus h3 { color: var(--accent-blue); margin-bottom: 8px; font-size: 16px; }
 
+/* Match timeline */
+.timeline { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 28px; }
+.timeline-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.timeline-row:last-child { border-bottom: none; }
+.timeline-row:hover { background: var(--bg-card); }
+.timeline-ts { font-family: monospace; font-variant-numeric: tabular-nums; color: var(--text-muted); min-width: 40px; flex-shrink: 0; }
+.timeline-event { flex: 1; }
+.timeline-death { color: var(--loss); }
+.timeline-cite { margin-left: auto; opacity: 0; padding: 2px 8px; border: none; border-radius: 4px; background: var(--bg-input); color: var(--accent-blue); font-size: 13px; cursor: pointer; transition: opacity .15s; }
+.timeline-row:hover .timeline-cite { opacity: 1; }
+
 /* Section titles */
 .section-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
 
