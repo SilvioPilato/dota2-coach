@@ -36,6 +36,55 @@ class AnalyzeRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# MatchSummary model + hero lookup (used by GET /recent-matches)
+# ---------------------------------------------------------------------------
+
+class MatchSummary(BaseModel):
+    match_id: int
+    hero_id: int
+    hero_name: str           # e.g. "Anti-Mage" or "" if unknown
+    start_time: int          # Unix timestamp
+    duration_seconds: int
+    won: bool                # True if player won
+    kills: int
+    deaths: int
+    assists: int
+    analyzed: bool           # True if in our local history DB
+    replay_available: bool   # True if start_time is within 7 days
+
+
+_HERO_NAMES: dict[int, str] = {
+    1: "Anti-Mage", 2: "Axe", 3: "Bane", 4: "Bloodseeker", 5: "Crystal Maiden",
+    6: "Drow Ranger", 7: "Earthshaker", 8: "Juggernaut", 9: "Mirana", 10: "Morphling",
+    11: "Shadow Fiend", 12: "Phantom Lancer", 13: "Puck", 14: "Pudge", 15: "Razor",
+    16: "Sand King", 17: "Storm Spirit", 18: "Sven", 19: "Tiny", 20: "Vengeful Spirit",
+    21: "Windranger", 22: "Zeus", 23: "Kunkka", 25: "Lina", 26: "Lion",
+    28: "Slardar", 29: "Tidehunter", 30: "Witch Doctor", 31: "Lich",
+    32: "Riki", 33: "Enigma", 34: "Tinker", 35: "Sniper", 36: "Necrophos",
+    37: "Warlock", 38: "Beastmaster", 39: "Queen of Pain", 40: "Venomancer",
+    41: "Faceless Void", 42: "Wraith King", 43: "Death Prophet", 44: "Phantom Assassin",
+    45: "Pugna", 46: "Templar Assassin", 47: "Viper", 48: "Luna", 49: "Dragon Knight",
+    50: "Dazzle", 51: "Clockwerk", 52: "Leshrac", 54: "Nature's Prophet",
+    55: "Lifestealer", 56: "Dark Seer", 57: "Clinkz", 58: "Omniknight",
+    59: "Enchantress", 61: "Broodmother", 62: "Bounty Hunter", 63: "Weaver",
+    64: "Jakiro", 65: "Batrider", 66: "Chen", 67: "Spectre", 69: "Doom",
+    70: "Ancient Apparition", 71: "Ursa", 72: "Spirit Breaker", 73: "Gyrocopter",
+    74: "Alchemist", 75: "Invoker", 76: "Silencer", 77: "Outworld Destroyer",
+    78: "Lycan", 79: "Brewmaster", 80: "Shadow Demon", 81: "Lone Druid",
+    82: "Chaos Knight", 83: "Meepo", 84: "Treant Protector", 85: "Ogre Magi",
+    86: "Undying", 87: "Rubick", 88: "Disruptor", 89: "Nyx Assassin",
+    90: "Naga Siren", 91: "Keeper of the Light", 92: "Io", 93: "Visage",
+    94: "Slark", 95: "Medusa", 96: "Troll Warlord", 97: "Centaur Warrunner",
+    98: "Magnus", 99: "Timbersaw", 100: "Bristleback", 101: "Tusk",
+    102: "Skywrath Mage", 103: "Abaddon", 104: "Elder Titan", 105: "Legion Commander",
+    106: "Techies", 107: "Ember Spirit", 108: "Earth Spirit", 109: "Underlord",
+    110: "Terrorblade", 111: "Phoenix", 112: "Oracle", 113: "Winter Wyvern",
+    114: "Arc Warden", 119: "Monkey King", 120: "Dark Willow", 121: "Pangolier",
+    123: "Grimstroke", 126: "Void Spirit", 128: "Snapfire", 129: "Mars",
+}
+
+
+# ---------------------------------------------------------------------------
 # POST /analyze
 # ---------------------------------------------------------------------------
 
@@ -223,6 +272,52 @@ async def match_history(account_id: int, limit: int = 20):
     from dota_coach.history import get_match_history
     records = get_match_history(account_id, limit=limit)
     return JSONResponse(content=records)
+
+
+# ---------------------------------------------------------------------------
+# GET /recent-matches/{account_id}
+# ---------------------------------------------------------------------------
+
+@app.get("/recent-matches/{account_id}")
+async def recent_matches(account_id: int):
+    """Return OpenDota recent matches joined with local analysis status."""
+    from datetime import datetime, timezone
+    from dota_coach.history import get_analyzed_ids
+    from dota_coach.opendota import get_recent_matches as opendota_recent
+
+    try:
+        raw = await opendota_recent(account_id, limit=20)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"OpenDota error: {exc}")
+
+    analyzed_ids = get_analyzed_ids(account_id)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    seven_days = 7 * 24 * 3600
+
+    summaries = []
+    for m in raw:
+        match_id = m.get("match_id", 0)
+        start_time = m.get("start_time", 0)
+        player_slot = m.get("player_slot", 0)
+        radiant_win = m.get("radiant_win", False)
+        is_radiant = player_slot < 128
+        won = (is_radiant and radiant_win) or (not is_radiant and not radiant_win)
+        hero_id = m.get("hero_id", 0)
+        summaries.append(MatchSummary(
+            match_id=match_id,
+            hero_id=hero_id,
+            hero_name=_HERO_NAMES.get(hero_id, ""),
+            start_time=start_time,
+            duration_seconds=m.get("duration", 0),
+            won=won,
+            kills=m.get("kills", 0),
+            deaths=m.get("deaths", 0),
+            assists=m.get("assists", 0),
+            analyzed=match_id in analyzed_ids,
+            replay_available=(now_ts - start_time) < seven_days,
+        ))
+
+    return JSONResponse(content=[s.model_dump() for s in summaries])
 
 
 # ---------------------------------------------------------------------------
