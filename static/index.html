@@ -8,6 +8,18 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
+  <div class="page-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">Recent Matches</div>
+      <div class="sidebar-list" id="sidebarList">
+        <div class="sidebar-empty" id="sidebarEmpty" style="display:none">No recent matches found</div>
+        <div class="sidebar-error" id="sidebarError" style="display:none">Could not load matches — check Player ID</div>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
 
   <!-- Input bar -->
   <div class="input-bar">
@@ -17,8 +29,13 @@
     <button id="reanalyzeBtn" style="display:none" onclick="runAnalysis(getCurrentRole(), {force_reanalyze: true})">Re-analyze</button>
     <button id="redownloadBtn" style="display:none" onclick="runAnalysis(getCurrentRole(), {force_redownload: true})">Re-download replay</button>
   </div>
+  <div id="lastAccountLabel" style="display:none; max-width:800px; margin:-20px auto 20px; padding:0 20px; font-size:12px; color:var(--text-muted);">
+    Last account: <span id="lastAccountId"></span>
+    <button onclick="dismissLastAccount()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px; padding:0 4px;">×</button>
+  </div>
 
-  <div class="spinner" id="spinner">Analyzing replay&hellip; this may take a minute</div>
+  <div class="stepper" id="stepper" style="display:none"></div>
+  <div class="stepper-summary" id="stepperSummary" style="display:none"></div>
   <div class="error-banner" id="errorBanner"></div>
 
   <!-- Report section (hidden until results arrive) -->
@@ -68,16 +85,28 @@
       <p id="priorityText"></p>
     </div>
 
+    <!-- Match timeline -->
+    <div id="timelineSection" style="display:none">
+      <h2 class="section-title">Match Timeline</h2>
+      <div id="timelineRows" class="timeline"></div>
+    </div>
+
     <!-- Chat panel -->
     <h2 class="section-title" id="chatTitle">Ask your Coach</h2>
     <div class="chat-panel" id="chatPanel">
       <div class="chat-messages" id="chatMessages"></div>
+      <div id="quotePreview" style="display:none" class="quote-preview">
+        📌 <span id="quoteText"></span>
+        <button class="quote-dismiss" onclick="clearQuote()">×</button>
+      </div>
       <div class="chat-input-bar">
-        <input type="text" id="chatInput" placeholder="Ask a follow-up question…"
-               onkeydown="if(event.key==='Enter')sendChat()">
+        <textarea id="chatInput" rows="1" placeholder="Ask a follow-up question…"></textarea>
         <button id="chatSendBtn" onclick="sendChat()">Send</button>
       </div>
     </div>
+  </div>
+
+    </main>
   </div>
 
 <script>
@@ -97,6 +126,7 @@ let lastMatchId = '';
 let lastPlayerId = '';
 let matchReport = null;   // Full MatchReport JSON from /analyze
 let chatHistory = [];     // Array of {role, content} turns
+window.currentQuote = null;
 
 /* ------------------------------------------------------------------ */
 /*  Role-adaptive metric card definitions                              */
@@ -135,6 +165,62 @@ const ROLE_CARDS = {
 };
 
 /* ------------------------------------------------------------------ */
+/*  Stepper                                                            */
+/* ------------------------------------------------------------------ */
+const PHASES = [
+  { id: 'metadata', label: 'Fetching match data' },
+  { id: 'download', label: 'Downloading replay' },
+  { id: 'parse',    label: 'Parsing replay' },
+  { id: 'enrich',   label: 'Enriching with benchmarks' },
+  { id: 'llm',      label: 'Generating coaching report' },
+];
+
+function initStepper() {
+  const el = document.getElementById('stepper');
+  el.className = 'stepper';
+  el.innerHTML = PHASES.map(p => `
+    <div class="step-row" id="step-row-${p.id}">
+      <span class="step-icon pending" id="step-icon-${p.id}"></span>
+      <div class="step-body">
+        <span class="step-label">${p.label}</span>
+        <span class="step-detail" id="step-detail-${p.id}"></span>
+      </div>
+      <span class="step-time" id="step-time-${p.id}"></span>
+    </div>
+  `).join('');
+  el.style.display = '';
+  document.getElementById('stepperSummary').style.display = 'none';
+}
+
+function updateStep(phase, status, detail, phase_ms) {
+  const icon = document.getElementById(`step-icon-${phase}`);
+  const detailEl = document.getElementById(`step-detail-${phase}`);
+  const timeEl = document.getElementById(`step-time-${phase}`);
+  if (!icon) return;
+  icon.className = `step-icon ${status}`;
+  if (detail) detailEl.textContent = detail;
+  if ((status === 'done' || status === 'error') && phase_ms != null) {
+    timeEl.textContent = (phase_ms / 1000).toFixed(1) + 's';
+  }
+}
+
+function collapseStepper(timings) {
+  const el = document.getElementById('stepper');
+  el.classList.add('stepper-collapsing');
+  setTimeout(() => {
+    el.style.display = 'none';
+    el.classList.remove('stepper-collapsing');
+    const summary = document.getElementById('stepperSummary');
+    const parts = PHASES
+      .filter(p => timings[p.id] != null)
+      .map(p => `${p.label.split(' ')[0].toLowerCase()} ${(timings[p.id] / 1000).toFixed(1)}s`)
+      .join(' · ');
+    summary.textContent = parts ? `▸ ${parts}` : '';
+    summary.style.display = parts ? '' : 'none';
+  }, 350);
+}
+
+/* ------------------------------------------------------------------ */
 /*  API call                                                           */
 /* ------------------------------------------------------------------ */
 async function runAnalysis(roleOverride = null, flags = {}) {
@@ -154,17 +240,20 @@ async function runAnalysis(roleOverride = null, flags = {}) {
     }
   }
 
-  // UI state: loading
+  // UI state: start streaming
   document.getElementById('report').classList.remove('visible');
   document.getElementById('errorBanner').classList.remove('visible');
-  document.getElementById('spinner').classList.add('visible');
   document.getElementById('analyzeBtn').disabled = true;
+  initStepper();
 
   const body = { match_id: matchId };
   if (playerId) body.player_id = playerId;
   if (roleOverride) body.role_override = Number(roleOverride);
   if (flags.force_reanalyze)  body.force_reanalyze  = true;
   if (flags.force_redownload) body.force_redownload = true;
+
+  const stepTimings = {};
+  let currentEvent = '';
 
   try {
     const res = await fetch('/analyze', {
@@ -173,18 +262,49 @@ async function runAnalysis(roleOverride = null, flags = {}) {
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || err.error || `HTTP ${res.status}`);
-    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
 
-    const data = await res.json();
-    localStorage.setItem(`dota_analysis_${matchId}_${playerId}`, JSON.stringify(data));
-    renderReport(data);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          const payload = JSON.parse(line.slice(6));
+          if (currentEvent === 'step') {
+            updateStep(payload.phase, payload.status, payload.detail, payload.phase_ms);
+            if (payload.status === 'done' && payload.phase_ms != null) {
+              stepTimings[payload.phase] = payload.phase_ms;
+            }
+            if (payload.status === 'error') {
+              showError(payload.message || 'Analysis failed');
+              document.getElementById('stepper').style.display = 'none';
+            }
+          } else if (currentEvent === 'report') {
+            localStorage.setItem(`dota_analysis_${matchId}_${playerId}`, JSON.stringify(payload));
+            collapseStepper(stepTimings);
+            renderReport(payload);
+            if (playerId) {
+              localStorage.setItem('dota_coach_account_id', playerId);
+              document.getElementById('lastAccountId').textContent = playerId;
+              document.getElementById('lastAccountLabel').style.display = '';
+              loadSidebar(playerId);
+            }
+          }
+          currentEvent = '';
+        }
+      }
+    }
   } catch (e) {
     showError(e.message);
+    document.getElementById('stepper').style.display = 'none';
   } finally {
-    document.getElementById('spinner').classList.remove('visible');
     document.getElementById('analyzeBtn').disabled = false;
   }
 }
@@ -302,7 +422,74 @@ function renderReport(d) {
     pf.style.display = 'none';
   }
 
+  // Timeline
+  renderTimeline(d.timeline || '');
+
   document.getElementById('report').classList.add('visible');
+}
+
+function renderTimeline(timelineStr) {
+  const section = document.getElementById('timelineSection');
+  const container = document.getElementById('timelineRows');
+
+  if (!timelineStr) {
+    section.style.display = 'none';
+    return;
+  }
+
+  const lines = timelineStr.split('\n');
+  // Skip the first line (header like "MATCH TIMELINE (Anti-Mage):")
+  const eventLines = lines.slice(1).filter(l => l.trim());
+
+  if (!eventLines.length) {
+    section.style.display = 'none';
+    return;
+  }
+
+  container.innerHTML = '';
+  for (const line of eventLines) {
+    // Parse "MM:SS — description"
+    const match = line.match(/^(\d{2}:\d{2})\s*[—-]+\s*(.+)$/);
+    if (!match) continue;
+
+    const [, ts, desc] = match;
+
+    const row = document.createElement('div');
+    row.className = 'timeline-row';
+
+    const tsSpan = document.createElement('span');
+    tsSpan.className = 'timeline-ts';
+    tsSpan.textContent = ts;
+
+    const eventSpan = document.createElement('span');
+    eventSpan.className = 'timeline-event' + (desc.includes('you died') ? ' timeline-death' : '');
+    eventSpan.textContent = desc;
+
+    const cite = document.createElement('button');
+    cite.className = 'timeline-cite';
+    cite.textContent = '→';
+    cite.dataset.event = desc;
+
+    cite.addEventListener('click', function() {
+      const eventText = this.dataset.event;
+      setQuote(eventText);
+
+      // Highlight the row for 2s
+      const row = this.closest('.timeline-row');
+      row.classList.add('timeline-row-cited');
+      setTimeout(() => row.classList.remove('timeline-row-cited'), 2000);
+
+      // Focus textarea
+      document.getElementById('chatInput').focus();
+    });
+
+    row.appendChild(tsSpan);
+    row.appendChild(eventSpan);
+    row.appendChild(cite);
+    container.appendChild(row);
+  }
+
+  section.style.display = '';
 }
 
 function fmtBenchName(s) {
@@ -360,6 +547,17 @@ function extractPriorityFocus(text) {
 /* ------------------------------------------------------------------ */
 /*  Chat panel                                                         */
 /* ------------------------------------------------------------------ */
+function setQuote(eventText) {
+  window.currentQuote = eventText;
+  document.getElementById('quoteText').textContent = eventText;
+  document.getElementById('quotePreview').style.display = '';
+}
+
+function clearQuote() {
+  window.currentQuote = null;
+  document.getElementById('quotePreview').style.display = 'none';
+}
+
 function appendChatBubble(role, text) {
   const el = document.createElement('div');
   el.className = 'chat-bubble chat-' + role;
@@ -373,13 +571,36 @@ function appendChatBubble(role, text) {
   return el;
 }
 
+function initChatInput() {
+  const ta = document.getElementById('chatInput');
+
+  // Auto-resize: 1 row default, max 4 rows
+  ta.addEventListener('input', function() {
+    this.style.height = 'auto';
+    const lineHeight = parseInt(getComputedStyle(this).lineHeight);
+    const maxHeight = lineHeight * 4;
+    this.style.height = Math.min(this.scrollHeight, maxHeight) + 'px';
+  });
+
+  // Enter sends, Shift+Enter inserts newline
+  ta.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChat();
+    }
+  });
+}
+
 async function sendChat() {
   const input = document.getElementById('chatInput');
   const msg = input.value.trim();
   if (!msg || !matchReport) return;
 
   input.value = '';
+  input.style.height = 'auto';  // reset height after clearing
+  clearQuote();
   document.getElementById('chatSendBtn').disabled = true;
+  document.getElementById('chatInput').disabled = true;
 
   // User bubble
   appendChatBubble('user', msg);
@@ -393,6 +614,7 @@ async function sendChat() {
     match_context: matchReport,
     history: chatHistory.slice(0, -1), // history before this message
     user_message: msg,
+    quote: window.currentQuote || null,
   };
 
   let fullText = '';
@@ -421,7 +643,7 @@ async function sendChat() {
         const payload = line.slice(6);
         if (payload === '[DONE]') continue;
         fullText += JSON.parse(payload);
-        bubble.innerHTML = mdToHtml(fullText);
+        bubble.innerHTML = mdToHtml(fullText) + '<span class="cursor">▋</span>';
       }
       bubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
@@ -430,10 +652,178 @@ async function sendChat() {
     bubble.innerHTML = marked.parse(fullText);
   }
 
+  bubble.innerHTML = mdToHtml(fullText);
   bubble.classList.remove('chat-streaming');
   chatHistory.push({ role: 'assistant', content: fullText });
   document.getElementById('chatSendBtn').disabled = false;
+  document.getElementById('chatInput').disabled = false;
   document.getElementById('chatInput').focus();
+}
+
+async function loadSidebar(accountId) {
+  if (!accountId) return;
+
+  // Show loading state
+  const list = document.getElementById('sidebarList');
+  const emptyEl = document.getElementById('sidebarEmpty');
+  const errorEl = document.getElementById('sidebarError');
+  emptyEl.style.display = 'none';
+  errorEl.style.display = 'none';
+
+  // Remove old rows (keep the empty/error placeholders)
+  Array.from(list.children).forEach(c => {
+    if (!c.id || (c.id !== 'sidebarEmpty' && c.id !== 'sidebarError')) c.remove();
+  });
+
+  // Insert loading indicator
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'sidebar-loading';
+  loadingEl.id = 'sidebarLoading';
+  loadingEl.textContent = 'Loading matches…';
+  list.insertBefore(loadingEl, emptyEl);
+
+  try {
+    const res = await fetch(`/recent-matches/${accountId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const matches = await res.json();
+    loadingEl.remove();
+    renderSidebar(matches);
+  } catch (e) {
+    loadingEl.remove();
+    showSidebarError();
+  }
+}
+
+function loadSavedAccount() {
+  const saved = localStorage.getItem('dota_coach_account_id');
+  if (saved) {
+    document.getElementById('playerId').value = saved;
+    document.getElementById('lastAccountId').textContent = saved;
+    document.getElementById('lastAccountLabel').style.display = '';
+    loadSidebar(saved);
+  }
+}
+
+function dismissLastAccount() {
+  localStorage.removeItem('dota_coach_account_id');
+  document.getElementById('lastAccountLabel').style.display = 'none';
+}
+
+// Initialize chat input textarea behavior
+initChatInput();
+
+// Load saved account on page load
+loadSavedAccount();
+
+/* ------------------------------------------------------------------ */
+/*  Sidebar                                                            */
+/* ------------------------------------------------------------------ */
+function renderSidebar(matches) {
+  const list = document.getElementById('sidebarList');
+  const emptyEl = document.getElementById('sidebarEmpty');
+  const errorEl = document.getElementById('sidebarError');
+
+  // Clear existing rows (keep empty/error placeholders)
+  Array.from(list.children).forEach(c => {
+    if (!c.id || (c.id !== 'sidebarEmpty' && c.id !== 'sidebarError')) c.remove();
+  });
+
+  if (!matches || matches.length === 0) {
+    emptyEl.style.display = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  errorEl.style.display = 'none';
+
+  matches.forEach(m => {
+    const expired = !m.replay_available;
+    const analyzed = m.analyzed;
+
+    // State class
+    let stateClass = expired ? 'state-expired' : (analyzed ? 'state-analyzed' : 'state-ready');
+
+    // Hero initials
+    const initials = m.hero_name
+      ? m.hero_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+      : '??';
+
+    // Date
+    const date = new Date(m.start_time * 1000).toLocaleDateString();
+
+    // Duration
+    const mins = Math.floor(m.duration_seconds / 60);
+    const secs = m.duration_seconds % 60;
+    const duration = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+    const row = document.createElement('div');
+    row.className = `sidebar-row ${stateClass}${expired ? ' sidebar-expired' : ''}`;
+    row.dataset.matchId = m.match_id;
+    row.dataset.heroName = m.hero_name;
+    row.dataset.analyzed = m.analyzed;
+    row.dataset.replayAvailable = m.replay_available;
+
+    row.innerHTML = `
+      <div class="sidebar-avatar">${initials}</div>
+      <div class="sidebar-info">
+        <div class="sidebar-hero">${m.hero_name || 'Unknown'}</div>
+        <div class="sidebar-meta">${date} · ${duration}</div>
+      </div>
+      <div class="sidebar-badge-wrap">
+        <span class="sidebar-badge ${m.won ? 'badge-win' : 'badge-loss'}">${m.won ? 'W' : 'L'}</span>
+        ${!expired ? `<button class="sidebar-action" style="display:none">${analyzed ? 'Re-analyze' : 'Analyze'}</button>` : ''}
+      </div>
+      <span class="sidebar-dot"></span>
+    `;
+
+    // Hover behavior (show action button, hide badge)
+    if (!expired) {
+      const badge = row.querySelector('.sidebar-badge');
+      const btn = row.querySelector('.sidebar-action');
+      row.addEventListener('mouseenter', () => {
+        badge.style.display = 'none';
+        btn.style.display = '';
+      });
+      row.addEventListener('mouseleave', () => {
+        badge.style.display = '';
+        btn.style.display = 'none';
+      });
+    }
+
+    if (analyzed && !expired) {
+      row.addEventListener('click', function(e) {
+        // Don't trigger if clicking the action button
+        if (e.target.classList.contains('sidebar-action')) return;
+        const pid = localStorage.getItem('dota_coach_account_id') || lastPlayerId || '';
+        const cacheKey = `dota_analysis_${m.match_id}_${pid}`;
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          try { renderReport(JSON.parse(cached)); } catch {}
+        }
+      });
+    }
+
+    if (!expired) {
+      const btn = row.querySelector('.sidebar-action');
+      if (btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          document.getElementById('matchId').value = m.match_id;
+          if (analyzed) {
+            runAnalysis(null, { force_reanalyze: true });
+          } else {
+            runAnalysis();
+          }
+        });
+      }
+    }
+
+    list.appendChild(row);
+  });
+}
+
+function showSidebarError() {
+  document.getElementById('sidebarError').style.display = '';
+  document.getElementById('sidebarEmpty').style.display = 'none';
 }
 </script>
 

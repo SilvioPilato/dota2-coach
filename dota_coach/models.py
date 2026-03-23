@@ -135,3 +135,4 @@ class ChatRequest(BaseModel):
     match_context: MatchReport
     history: list[ChatTurn] = []
     user_message: str
+    quote: str | None = None
