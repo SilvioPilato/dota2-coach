@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 from typing import Literal, Optional
 
 from pydantic import BaseModel
@@ -11,9 +12,20 @@ class LHEntry(BaseModel):
     denies: int
 
 
+class DeathCause(str, enum.Enum):
+    TEAMFIGHT = "TEAMFIGHT"
+    DIVE = "DIVE"
+    GANK_RUNE = "GANK_RUNE"
+    NO_TP_RESPONSE = "NO_TP_RESPONSE"
+    OVEREXTENSION = "OVEREXTENSION"
+    UNKNOWN = "UNKNOWN"
+
+
 class DeathEvent(BaseModel):
     time_minutes: float
     killer: str
+    cause: DeathCause = DeathCause.UNKNOWN
+    cause_detail: str = ""
 
 
 class TeamfightEntry(BaseModel):

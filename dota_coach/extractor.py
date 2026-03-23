@@ -12,6 +12,25 @@ from dota_coach.models import MatchMetrics
 
 WARD_ITEMS = {"item_ward_dispenser", "item_ward_sentry"}
 
+# --- Tower coordinates (approximate; TODO: verify against fixture data) ---
+# Coordinates are in Dota 2 world space (roughly -8000 to +8000 on each axis).
+# Radiant T1 towers
+RADIANT_T1_TOP = (-3800, 1900)   # TODO: verify against fixture data
+RADIANT_T1_MID = (-1100, -1300)  # TODO: verify against fixture data
+RADIANT_T1_BOT = (3000, -5200)   # TODO: verify against fixture data
+# Radiant T2 towers
+RADIANT_T2_TOP = (-4800, 4000)   # TODO: verify against fixture data
+RADIANT_T2_MID = (-2300, -2600)  # TODO: verify against fixture data
+RADIANT_T2_BOT = (3700, -6000)   # TODO: verify against fixture data
+# Dire T1 towers
+DIRE_T1_TOP = (-3000, 5200)      # TODO: verify against fixture data
+DIRE_T1_MID = (1100, 1300)       # TODO: verify against fixture data
+DIRE_T1_BOT = (3800, -1900)      # TODO: verify against fixture data
+# Dire T2 towers
+DIRE_T2_TOP = (-3700, 6000)      # TODO: verify against fixture data
+DIRE_T2_MID = (2300, 2600)       # TODO: verify against fixture data
+DIRE_T2_BOT = (4800, -4000)      # TODO: verify against fixture data
+
 # Dota 2 map geometry (normalized 0-256 coordinate space from odota parser).
 # Radiant own half: x + y < 256  (bottom-left)
 # Dire own half:   x + y > 256  (top-right)

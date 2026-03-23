@@ -1,6 +1,7 @@
 """Carry mistake detection with threshold rules (v2: percentile-based, role-aware)."""
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Optional
 
 from dota_coach import config
@@ -11,6 +12,138 @@ from dota_coach.models import (
     MatchMetrics,
     RoleProfile,
 )
+
+
+@dataclass
+class ItemPath:
+    """Describes a hero's item build path and expected timing for the first key item."""
+
+    name: str               # path identifier, e.g. "standard", "radiance", "battlefury"
+    items: list[str]        # required items (OpenDota item names, e.g. "battle_fury", "manta")
+    timing_minutes: int     # target minute for the first key item
+    timing_window: int      # acceptable ± deviation in minutes
+
+
+# Lookup table keyed by localized hero name (matches MatchMetrics.hero / OpenDota localized_name).
+# Each hero maps to one or more named build paths with timing expectations.
+HERO_ITEM_PATHS: dict[str, list[ItemPath]] = {
+    "Anti-Mage": [
+        ItemPath(
+            name="standard",
+            items=["battle_fury", "manta", "butterfly"],
+            timing_minutes=17,
+            timing_window=4,
+        ),
+    ],
+    "Juggernaut": [
+        ItemPath(
+            name="battlefury",
+            items=["battle_fury", "manta", "butterfly"],
+            timing_minutes=18,
+            timing_window=4,
+        ),
+        ItemPath(
+            name="mjollnir",
+            items=["maelstrom", "mjollnir", "manta"],
+            timing_minutes=18,
+            timing_window=4,
+        ),
+    ],
+    "Phantom Assassin": [
+        ItemPath(
+            name="desolator",
+            items=["desolator", "black_king_bar"],
+            timing_minutes=18,
+            timing_window=4,
+        ),
+        ItemPath(
+            name="battlefury",
+            items=["battle_fury", "desolator"],
+            timing_minutes=20,
+            timing_window=4,
+        ),
+    ],
+    "Drow Ranger": [
+        ItemPath(
+            name="standard",
+            items=["dragon_lance", "manta", "silver_edge"],
+            timing_minutes=20,
+            timing_window=4,
+        ),
+    ],
+    "Terrorblade": [
+        ItemPath(
+            name="standard",
+            items=["manta", "sange_and_yasha", "butterfly"],
+            timing_minutes=20,
+            timing_window=4,
+        ),
+    ],
+    "Medusa": [
+        ItemPath(
+            name="radiance",
+            items=["radiance", "manta", "skadi"],
+            timing_minutes=22,
+            timing_window=4,
+        ),
+    ],
+    "Faceless Void": [
+        ItemPath(
+            name="battlefury",
+            items=["battle_fury", "mask_of_madness"],
+            timing_minutes=18,
+            timing_window=4,
+        ),
+        ItemPath(
+            name="maelstrom",
+            items=["maelstrom", "mask_of_madness", "mjollnir"],
+            timing_minutes=16,
+            timing_window=4,
+        ),
+    ],
+    "Wraith King": [
+        ItemPath(
+            name="radiance",
+            items=["radiance", "armlet", "assault"],
+            timing_minutes=20,
+            timing_window=4,
+        ),
+        ItemPath(
+            name="armlet",
+            items=["armlet", "black_king_bar"],
+            timing_minutes=12,
+            timing_window=4,
+        ),
+    ],
+    "Luna": [
+        ItemPath(
+            name="mask_of_madness",
+            items=["mask_of_madness", "dragon_lance", "manta"],
+            timing_minutes=12,
+            timing_window=4,
+        ),
+        ItemPath(
+            name="manta",
+            items=["dragon_lance", "manta", "butterfly"],
+            timing_minutes=22,
+            timing_window=4,
+        ),
+    ],
+    "Slark": [
+        ItemPath(
+            name="echo_sabre",
+            items=["echo_sabre", "diffusal_blade"],
+            timing_minutes=18,
+            timing_window=4,
+        ),
+        ItemPath(
+            name="diffusal_blade",
+            items=["diffusal_blade", "sange_and_yasha"],
+            timing_minutes=18,
+            timing_window=4,
+        ),
+    ],
+}
 
 CORE_ITEMS: frozenset[str] = frozenset({
     # Farming / tempo items
