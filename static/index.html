@@ -17,6 +17,10 @@
     <button id="reanalyzeBtn" style="display:none" onclick="runAnalysis(getCurrentRole(), {force_reanalyze: true})">Re-analyze</button>
     <button id="redownloadBtn" style="display:none" onclick="runAnalysis(getCurrentRole(), {force_redownload: true})">Re-download replay</button>
   </div>
+  <div id="lastAccountLabel" style="display:none; max-width:800px; margin:-20px auto 20px; padding:0 20px; font-size:12px; color:var(--text-muted);">
+    Last account: <span id="lastAccountId"></span>
+    <button onclick="dismissLastAccount()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px; padding:0 4px;">×</button>
+  </div>
 
   <div class="spinner" id="spinner">Analyzing replay&hellip; this may take a minute</div>
   <div class="error-banner" id="errorBanner"></div>
@@ -186,6 +190,12 @@ async function runAnalysis(roleOverride = null, flags = {}) {
     const data = await res.json();
     localStorage.setItem(`dota_analysis_${matchId}_${playerId}`, JSON.stringify(data));
     renderReport(data);
+    // Save player ID to localStorage for next session
+    if (playerId) {
+      localStorage.setItem('dota_coach_account_id', playerId);
+      document.getElementById('lastAccountId').textContent = playerId;
+      document.getElementById('lastAccountLabel').style.display = '';
+    }
   } catch (e) {
     showError(e.message);
   } finally {
@@ -519,8 +529,25 @@ async function sendChat() {
   document.getElementById('chatInput').focus();
 }
 
+function loadSavedAccount() {
+  const saved = localStorage.getItem('dota_coach_account_id');
+  if (saved) {
+    document.getElementById('playerId').value = saved;
+    document.getElementById('lastAccountId').textContent = saved;
+    document.getElementById('lastAccountLabel').style.display = '';
+  }
+}
+
+function dismissLastAccount() {
+  localStorage.removeItem('dota_coach_account_id');
+  document.getElementById('lastAccountLabel').style.display = 'none';
+}
+
 // Initialize chat input textarea behavior
 initChatInput();
+
+// Load saved account on page load
+loadSavedAccount();
 </script>
 
 </body>
