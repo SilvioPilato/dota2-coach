@@ -673,7 +673,7 @@ function renderSidebar(matches) {
       row.addEventListener('click', function(e) {
         // Don't trigger if clicking the action button
         if (e.target.classList.contains('sidebar-action')) return;
-        const pid = lastPlayerId || localStorage.getItem('dota_coach_account_id') || '';
+        const pid = localStorage.getItem('dota_coach_account_id') || lastPlayerId || '';
         const cacheKey = `dota_analysis_${m.match_id}_${pid}`;
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
