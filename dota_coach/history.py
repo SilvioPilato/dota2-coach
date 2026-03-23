@@ -130,3 +130,20 @@ def count_hero_matches(account_id: int, hero: str) -> int:
     except Exception as exc:
         logger.warning("Failed to count hero matches for %s: %s", hero, exc)
         return 0
+
+
+def get_analyzed_ids(account_id: int) -> set[int]:
+    """Return a set of match IDs that have been analyzed for an account.
+
+    Returns an empty set on any DB error.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT match_id FROM match_history WHERE account_id = ?",
+                (account_id,),
+            ).fetchall()
+        return {int(r["match_id"]) for r in rows}
+    except Exception as exc:
+        logger.warning("Failed to load analyzed IDs for account %s: %s", account_id, exc)
+        return set()
