@@ -356,6 +356,11 @@ async def recent_matches(account_id: int):
     from dota_coach.history import get_analyzed_ids
     from dota_coach.opendota import get_recent_matches as opendota_recent
 
+    # Normalize Steam 64-bit ID → OpenDota 32-bit account ID
+    _STEAM64_BASE = 76561197960265728
+    if account_id > _STEAM64_BASE:
+        account_id = account_id - _STEAM64_BASE
+
     try:
         raw = await opendota_recent(account_id, limit=20)
     except Exception as exc:
