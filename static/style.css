@@ -94,9 +94,9 @@ a { color: var(--accent-blue); }
 /* Chat panel */
 .chat-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .chat-messages { max-height: 400px; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.chat-bubble { max-width: 80%; min-width: 0; padding: 10px 14px; border-radius: var(--radius); font-size: 14px; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; }
-.chat-user { align-self: flex-end; background: var(--bg-input); color: var(--text); white-space: pre-wrap; }
-.chat-assistant { align-self: flex-start; background: var(--border); color: var(--text); }
+.chat-bubble { max-width: 85%; min-width: 0; padding: 10px 14px; border-radius: var(--radius); font-size: 14px; line-height: 1.5; overflow-wrap: break-word; word-break: break-word; }
+.chat-user { align-self: flex-end; background: var(--accent); color: #fff; border-radius: var(--radius) var(--radius) 3px var(--radius); }
+.chat-assistant { align-self: flex-start; background: var(--bg-card); color: var(--text); border-radius: var(--radius) var(--radius) var(--radius) 3px; }
 .chat-assistant p { margin: 0 0 8px; }
 .chat-assistant p:last-child { margin-bottom: 0; }
 .chat-assistant ul, .chat-assistant ol { margin: 4px 0 8px 18px; }
