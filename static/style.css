@@ -25,11 +25,30 @@ a { color: var(--accent-blue); }
 .input-bar button:hover { opacity: .9; }
 .input-bar button:disabled { opacity: .5; cursor: not-allowed; }
 
-/* Spinner */
-.spinner { text-align: center; padding: 60px 0; color: var(--text-muted); font-size: 16px; display: none; }
-.spinner.visible { display: block; }
-.spinner::before { content: ''; display: block; width: 36px; height: 36px; margin: 0 auto 14px; border: 3px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin .8s linear infinite; }
+/* Spinner (kept for sidebar loading indicator) */
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Progress stepper */
+.stepper { max-width: 560px; margin: 40px auto; padding: 0 20px; transition: opacity .35s ease, transform .35s ease; }
+.stepper-collapsing { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+.step-row { display: flex; align-items: center; gap: 14px; padding: 9px 0; font-size: 14px; }
+.step-icon {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+}
+.step-icon.pending { border: 2px solid var(--border); color: var(--text-muted); }
+.step-icon.pending::after { content: '○'; }
+.step-icon.running { border: 2px solid var(--accent-blue); border-top-color: transparent; animation: spin .8s linear infinite; }
+.step-icon.done { background: var(--win); color: #fff; }
+.step-icon.done::after { content: '✓'; }
+.step-icon.error { background: var(--loss); color: #fff; }
+.step-icon.error::after { content: '✗'; }
+.step-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.step-label { font-weight: 500; color: var(--text); }
+.step-detail { font-size: 12px; color: var(--text-muted); }
+.step-time { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 38px; text-align: right; }
+/* Compact timing summary shown below report header after collapse */
+.stepper-summary { max-width: 900px; margin: -8px auto 18px; padding: 0 20px; font-size: 12px; color: var(--text-muted); }
 
 /* Error banner */
 .error-banner { max-width: 800px; margin: 0 auto 20px; padding: 14px 20px; background: #3a1424; border: 1px solid var(--loss); border-radius: var(--radius); color: var(--loss); display: none; }

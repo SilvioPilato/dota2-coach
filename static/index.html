@@ -34,7 +34,8 @@
     <button onclick="dismissLastAccount()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px; padding:0 4px;">×</button>
   </div>
 
-  <div class="spinner" id="spinner">Analyzing replay&hellip; this may take a minute</div>
+  <div class="stepper" id="stepper" style="display:none"></div>
+  <div class="stepper-summary" id="stepperSummary" style="display:none"></div>
   <div class="error-banner" id="errorBanner"></div>
 
   <!-- Report section (hidden until results arrive) -->
@@ -164,6 +165,62 @@ const ROLE_CARDS = {
 };
 
 /* ------------------------------------------------------------------ */
+/*  Stepper                                                            */
+/* ------------------------------------------------------------------ */
+const PHASES = [
+  { id: 'metadata', label: 'Fetching match data' },
+  { id: 'download', label: 'Downloading replay' },
+  { id: 'parse',    label: 'Parsing replay' },
+  { id: 'enrich',   label: 'Enriching with benchmarks' },
+  { id: 'llm',      label: 'Generating coaching report' },
+];
+
+function initStepper() {
+  const el = document.getElementById('stepper');
+  el.className = 'stepper';
+  el.innerHTML = PHASES.map(p => `
+    <div class="step-row" id="step-row-${p.id}">
+      <span class="step-icon pending" id="step-icon-${p.id}"></span>
+      <div class="step-body">
+        <span class="step-label">${p.label}</span>
+        <span class="step-detail" id="step-detail-${p.id}"></span>
+      </div>
+      <span class="step-time" id="step-time-${p.id}"></span>
+    </div>
+  `).join('');
+  el.style.display = '';
+  document.getElementById('stepperSummary').style.display = 'none';
+}
+
+function updateStep(phase, status, detail, phase_ms) {
+  const icon = document.getElementById(`step-icon-${phase}`);
+  const detailEl = document.getElementById(`step-detail-${phase}`);
+  const timeEl = document.getElementById(`step-time-${phase}`);
+  if (!icon) return;
+  icon.className = `step-icon ${status}`;
+  if (detail) detailEl.textContent = detail;
+  if ((status === 'done' || status === 'error') && phase_ms != null) {
+    timeEl.textContent = (phase_ms / 1000).toFixed(1) + 's';
+  }
+}
+
+function collapseStepper(timings) {
+  const el = document.getElementById('stepper');
+  el.classList.add('stepper-collapsing');
+  setTimeout(() => {
+    el.style.display = 'none';
+    el.classList.remove('stepper-collapsing');
+    const summary = document.getElementById('stepperSummary');
+    const parts = PHASES
+      .filter(p => timings[p.id] != null)
+      .map(p => `${p.label.split(' ')[0].toLowerCase()} ${(timings[p.id] / 1000).toFixed(1)}s`)
+      .join(' · ');
+    summary.textContent = parts ? `▸ ${parts}` : '';
+    summary.style.display = parts ? '' : 'none';
+  }, 350);
+}
+
+/* ------------------------------------------------------------------ */
 /*  API call                                                           */
 /* ------------------------------------------------------------------ */
 async function runAnalysis(roleOverride = null, flags = {}) {
@@ -183,17 +240,20 @@ async function runAnalysis(roleOverride = null, flags = {}) {
     }
   }
 
-  // UI state: loading
+  // UI state: start streaming
   document.getElementById('report').classList.remove('visible');
   document.getElementById('errorBanner').classList.remove('visible');
-  document.getElementById('spinner').classList.add('visible');
   document.getElementById('analyzeBtn').disabled = true;
+  initStepper();
 
   const body = { match_id: matchId };
   if (playerId) body.player_id = playerId;
   if (roleOverride) body.role_override = Number(roleOverride);
   if (flags.force_reanalyze)  body.force_reanalyze  = true;
   if (flags.force_redownload) body.force_redownload = true;
+
+  const stepTimings = {};
+  let currentEvent = '';
 
   try {
     const res = await fetch('/analyze', {
@@ -202,25 +262,49 @@ async function runAnalysis(roleOverride = null, flags = {}) {
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || err.error || `HTTP ${res.status}`);
-    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
 
-    const data = await res.json();
-    localStorage.setItem(`dota_analysis_${matchId}_${playerId}`, JSON.stringify(data));
-    renderReport(data);
-    // Save player ID to localStorage for next session
-    if (playerId) {
-      localStorage.setItem('dota_coach_account_id', playerId);
-      document.getElementById('lastAccountId').textContent = playerId;
-      document.getElementById('lastAccountLabel').style.display = '';
-      loadSidebar(playerId);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          const payload = JSON.parse(line.slice(6));
+          if (currentEvent === 'step') {
+            updateStep(payload.phase, payload.status, payload.detail, payload.phase_ms);
+            if (payload.status === 'done' && payload.phase_ms != null) {
+              stepTimings[payload.phase] = payload.phase_ms;
+            }
+            if (payload.status === 'error') {
+              showError(payload.message || 'Analysis failed');
+              document.getElementById('stepper').style.display = 'none';
+            }
+          } else if (currentEvent === 'report') {
+            localStorage.setItem(`dota_analysis_${matchId}_${playerId}`, JSON.stringify(payload));
+            collapseStepper(stepTimings);
+            renderReport(payload);
+            if (playerId) {
+              localStorage.setItem('dota_coach_account_id', playerId);
+              document.getElementById('lastAccountId').textContent = playerId;
+              document.getElementById('lastAccountLabel').style.display = '';
+              loadSidebar(playerId);
+            }
+          }
+          currentEvent = '';
+        }
+      }
     }
   } catch (e) {
     showError(e.message);
+    document.getElementById('stepper').style.display = 'none';
   } finally {
-    document.getElementById('spinner').classList.remove('visible');
     document.getElementById('analyzeBtn').disabled = false;
   }
 }
