@@ -8,6 +8,18 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
+  <div class="page-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">Recent Matches</div>
+      <div class="sidebar-list" id="sidebarList">
+        <div class="sidebar-empty" id="sidebarEmpty" style="display:none">No recent matches found</div>
+        <div class="sidebar-error" id="sidebarError" style="display:none">Could not load matches — check Player ID</div>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
 
   <!-- Input bar -->
   <div class="input-bar">
@@ -91,6 +103,9 @@
         <button id="chatSendBtn" onclick="sendChat()">Send</button>
       </div>
     </div>
+  </div>
+
+    </main>
   </div>
 
 <script>
@@ -579,6 +594,89 @@ initChatInput();
 
 // Load saved account on page load
 loadSavedAccount();
+
+/* ------------------------------------------------------------------ */
+/*  Sidebar                                                            */
+/* ------------------------------------------------------------------ */
+function renderSidebar(matches) {
+  const list = document.getElementById('sidebarList');
+  const emptyEl = document.getElementById('sidebarEmpty');
+  const errorEl = document.getElementById('sidebarError');
+
+  // Clear existing rows (keep empty/error placeholders)
+  Array.from(list.children).forEach(c => {
+    if (!c.id || (c.id !== 'sidebarEmpty' && c.id !== 'sidebarError')) c.remove();
+  });
+
+  if (!matches || matches.length === 0) {
+    emptyEl.style.display = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  errorEl.style.display = 'none';
+
+  matches.forEach(m => {
+    const expired = !m.replay_available;
+    const analyzed = m.analyzed;
+
+    // State class
+    let stateClass = expired ? 'state-expired' : (analyzed ? 'state-analyzed' : 'state-ready');
+
+    // Hero initials
+    const initials = m.hero_name
+      ? m.hero_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+      : '??';
+
+    // Date
+    const date = new Date(m.start_time * 1000).toLocaleDateString();
+
+    // Duration
+    const mins = Math.floor(m.duration_seconds / 60);
+    const secs = m.duration_seconds % 60;
+    const duration = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+    const row = document.createElement('div');
+    row.className = `sidebar-row ${stateClass}${expired ? ' sidebar-expired' : ''}`;
+    row.dataset.matchId = m.match_id;
+    row.dataset.heroName = m.hero_name;
+    row.dataset.analyzed = m.analyzed;
+    row.dataset.replayAvailable = m.replay_available;
+
+    row.innerHTML = `
+      <div class="sidebar-avatar">${initials}</div>
+      <div class="sidebar-info">
+        <div class="sidebar-hero">${m.hero_name || 'Unknown'}</div>
+        <div class="sidebar-meta">${date} · ${duration}</div>
+      </div>
+      <div class="sidebar-badge-wrap">
+        <span class="sidebar-badge ${m.won ? 'badge-win' : 'badge-loss'}">${m.won ? 'W' : 'L'}</span>
+        ${!expired ? `<button class="sidebar-action" style="display:none">${analyzed ? 'Re-analyze' : 'Analyze'}</button>` : ''}
+      </div>
+      <span class="sidebar-dot"></span>
+    `;
+
+    // Hover behavior (show action button, hide badge)
+    if (!expired) {
+      const badge = row.querySelector('.sidebar-badge');
+      const btn = row.querySelector('.sidebar-action');
+      row.addEventListener('mouseenter', () => {
+        badge.style.display = 'none';
+        btn.style.display = '';
+      });
+      row.addEventListener('mouseleave', () => {
+        badge.style.display = '';
+        btn.style.display = 'none';
+      });
+    }
+
+    list.appendChild(row);
+  });
+}
+
+function showSidebarError() {
+  document.getElementById('sidebarError').style.display = '';
+  document.getElementById('sidebarEmpty').style.display = 'none';
+}
 </script>
 
 </body>

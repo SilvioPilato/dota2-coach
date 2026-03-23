@@ -141,6 +141,34 @@ a { color: var(--accent-blue); }
 .chat-input-bar button:hover { opacity: .9; }
 .chat-input-bar button:disabled { opacity: .5; cursor: not-allowed; }
 
+/* Page layout */
+.page-layout { display: flex; min-height: 100vh; }
+.sidebar { width: 260px; flex-shrink: 0; background: var(--bg-card); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar-header { padding: 16px; font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--border); }
+.main-content { flex: 1; min-width: 0; }
+.sidebar-list { flex: 1; overflow-y: auto; }
+.sidebar-empty, .sidebar-error { padding: 16px; font-size: 13px; color: var(--text-muted); text-align: center; }
+.sidebar-error { color: var(--loss); }
+
+/* Sidebar rows */
+.sidebar-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.sidebar-row:hover:not(.sidebar-expired) { background: var(--bg-input); }
+.sidebar-expired { opacity: .5; cursor: default; }
+.sidebar-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.sidebar-info { flex: 1; min-width: 0; }
+.sidebar-hero { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.sidebar-badge-wrap { flex-shrink: 0; }
+.sidebar-badge { padding: 2px 7px; border-radius: 3px; font-size: 11px; font-weight: 700; }
+.sidebar-action { padding: 2px 8px; border: 1px solid var(--accent-blue); border-radius: 3px; background: none; color: var(--accent-blue); font-size: 11px; cursor: pointer; white-space: nowrap; }
+.sidebar-action:hover { background: var(--accent-blue); color: #fff; }
+
+/* State dots */
+.sidebar-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.state-analyzed .sidebar-dot { background: var(--accent-blue); }
+.state-ready .sidebar-dot { background: var(--text-muted); }
+.state-expired .sidebar-dot { background: #e07c24; }
+
 /* Quote preview */
 .quote-preview { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--bg-input); border-top: 1px solid var(--border); font-size: 13px; color: var(--text-muted); }
 .quote-dismiss { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 0 4px; line-height: 1; }
