@@ -80,6 +80,9 @@ class MatchMetrics(BaseModel):
     tower_damage: Optional[int] = None
     initiation_rate: Optional[float] = None
 
+    # Death classification
+    death_events: list[DeathEvent] = []
+
     # Game mode
     turbo: bool = False
 

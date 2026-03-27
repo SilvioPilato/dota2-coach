@@ -2,39 +2,211 @@
 from __future__ import annotations
 
 import json
+import math as _math
 import re
 from typing import Any
 
-from dota_coach.models import MatchMetrics
+from dota_coach.models import DeathCause, DeathEvent, MatchMetrics
 
 # Imported here to avoid circular import; detector defines CORE_ITEMS
 # We do a lazy import inside the function so extractor can be imported independently.
 
 WARD_ITEMS = {"item_ward_dispenser", "item_ward_sentry"}
 
-# --- Tower coordinates (approximate; TODO: verify against fixture data) ---
-# Coordinates are in Dota 2 world space (roughly -8000 to +8000 on each axis).
+# Radius (in 0-256 normalised coordinate space) within which a death near an
+# enemy tower is classified as a DIVE.
+DIVE_RADIUS = 10
+
+# Rune spawn locations in 0-256 normalised coordinate space.
+# Bounty runes sit at the river edges; power runes at mid-river.
+_RUNE_SPOTS = [
+    (107.0, 128.0),  # bounty rune — top-left river
+    (149.0, 128.0),  # bounty rune — top-right river
+    (128.0, 107.0),  # power rune — bottom river
+    (128.0, 149.0),  # power rune — top river
+]
+_RUNE_RADIUS = 15.0
+
+# 90-second window used for the NO_TP_RESPONSE check.
+_TP_WINDOW_SECS = 90
+
+# --- Tower coordinates in 0-256 normalised coordinate space (odota parser) ---
+# The odota parser normalises Dota 2 world space to a 0-256 grid:
+#   (75, 75)   ≈ Radiant fountain (bottom-left)
+#   (180, 180) ≈ Dire fountain    (top-right)
+# x increases going right; y increases going up.
+# Lane orientation:
+#   Bot lane runs along the bottom edge at low y, high x toward Dire.
+#   Top lane runs along the left edge at low x, high y toward Dire.
+#   Mid lane runs diagonally from bottom-left to top-right.
+# Map diagonal x + y = 256 separates Radiant half (x+y < 256) from Dire half (x+y > 256).
+#
+# Radiant T1/T2 positions derived from fixtures/sample_match.json by locating
+# the attacker hero positions (interval records) at the moment each tower was
+# killed (DOTA_COMBATLOG_TEAM_BUILDING_KILL).  Dire positions obtained by
+# 180-degree rotational symmetry: Dire(x, y) = (256 - Radiant_mirror_x, 256 - Radiant_mirror_y).
+#
 # Radiant T1 towers
-RADIANT_T1_TOP = (-3800, 1900)   # TODO: verify against fixture data
-RADIANT_T1_MID = (-1100, -1300)  # TODO: verify against fixture data
-RADIANT_T1_BOT = (3000, -5200)   # TODO: verify against fixture data
+RADIANT_T1_TOP = (80, 146)   # derived: Oracle/PA at (81,148)/(79,145) at kill t=1041
+RADIANT_T1_MID = (115, 118)  # derived: Naga Siren at (117,119) at kill t=777
+RADIANT_T1_BOT = (167, 79)   # derived: Omniknight/Naga at (166,78)/(168,81) at kill t=887
 # Radiant T2 towers
-RADIANT_T2_TOP = (-4800, 4000)   # TODO: verify against fixture data
-RADIANT_T2_MID = (-2300, -2600)  # TODO: verify against fixture data
-RADIANT_T2_BOT = (3700, -6000)   # TODO: verify against fixture data
-# Dire T1 towers
-DIRE_T1_TOP = (-3000, 5200)      # TODO: verify against fixture data
-DIRE_T1_MID = (1100, 1300)       # TODO: verify against fixture data
-DIRE_T1_BOT = (3800, -1900)      # TODO: verify against fixture data
-# Dire T2 towers
-DIRE_T2_TOP = (-3700, 6000)      # TODO: verify against fixture data
-DIRE_T2_MID = (2300, 2600)       # TODO: verify against fixture data
-DIRE_T2_BOT = (4800, -4000)      # TODO: verify against fixture data
+RADIANT_T2_TOP = (78, 123)   # derived: Omniknight/Naga at (77,123)/(79,123) at kill t=1353
+RADIANT_T2_MID = (100, 102)  # estimated by mid-lane geometry (no kill in fixture)
+RADIANT_T2_BOT = (123, 79)   # derived: Naga Siren at (123,79) at kill t=1067
+# Dire T1 towers  (mirror of Radiant T1 across map centre)
+DIRE_T1_TOP = (89, 177)      # mirror of RADIANT_T1_BOT
+DIRE_T1_MID = (141, 138)     # mirror of RADIANT_T1_MID
+DIRE_T1_BOT = (176, 110)     # mirror of RADIANT_T1_TOP
+# Dire T2 towers  (mirror of Radiant T2 across map centre)
+DIRE_T2_TOP = (133, 177)     # mirror of RADIANT_T2_BOT
+DIRE_T2_MID = (156, 154)     # mirror of RADIANT_T2_MID
+DIRE_T2_BOT = (178, 133)     # mirror of RADIANT_T2_TOP
 
 # Dota 2 map geometry (normalized 0-256 coordinate space from odota parser).
 # Radiant own half: x + y < 256  (bottom-left)
 # Dire own half:   x + y > 256  (top-right)
 _MAP_DIAGONAL = 256.0
+
+
+def _classify_death(
+    death: dict,
+    our_parser_slot: int,
+    records: list[dict],
+    teamfights: list[dict],
+    our_npc_name: str,
+    our_team_radiant: bool,
+) -> tuple[DeathCause, str]:
+    """Classify a single hero death into a DeathCause.
+
+    Args:
+        death: The DOTA_COMBATLOG_DEATH record for our hero
+        our_parser_slot: Parser slot index for our hero
+        records: All parser records (for interval/purchase lookup)
+        teamfights: match_meta["teamfights"] list (from OpenDota)
+        our_npc_name: e.g. "npc_dota_hero_sand_king"
+        our_team_radiant: True if our team is Radiant
+
+    Returns:
+        (DeathCause, cause_detail_string)
+    """
+    death_time: int = death.get("time", 0)
+    death_time_min: float = death_time / 60.0
+
+    # ------------------------------------------------------------------
+    # 1. TEAMFIGHT — death window overlaps a fight where we dealt damage
+    # ------------------------------------------------------------------
+    for fight in teamfights:
+        start_t = fight.get("start", 0)
+        end_t = fight.get("end", start_t)
+        if not (start_t <= death_time <= end_t):
+            continue
+        player_entries = fight.get("players") or []
+        if our_parser_slot >= len(player_entries):
+            continue
+        if (player_entries[our_parser_slot] or {}).get("damage", 0) > 0:
+            start_min = start_t / 60.0
+            return DeathCause.TEAMFIGHT, f"teamfight at {start_min:.1f}min"
+
+    # ------------------------------------------------------------------
+    # Helper: get our position from interval records at death time
+    # ------------------------------------------------------------------
+    def _position_at(slot: int, time: int) -> tuple[float, float] | None:
+        candidates = [
+            r for r in records
+            if r.get("type") == "interval"
+            and r.get("slot") == slot
+            and r.get("time", -9999) <= time
+            and "x" in r and "y" in r
+        ]
+        if not candidates:
+            return None
+        rec = max(candidates, key=lambda r: r["time"])
+        return rec["x"], rec["y"]
+
+    pos = _position_at(our_parser_slot, death_time)
+
+    # ------------------------------------------------------------------
+    # 2. DIVE — died within DIVE_RADIUS of an enemy tower
+    # ------------------------------------------------------------------
+    # Enemy towers: RADIANT towers if we are Dire; DIRE towers if we are Radiant
+    if our_team_radiant:
+        enemy_towers = {
+            "DIRE_T1_TOP": DIRE_T1_TOP,
+            "DIRE_T1_MID": DIRE_T1_MID,
+            "DIRE_T1_BOT": DIRE_T1_BOT,
+            "DIRE_T2_TOP": DIRE_T2_TOP,
+            "DIRE_T2_MID": DIRE_T2_MID,
+            "DIRE_T2_BOT": DIRE_T2_BOT,
+        }
+    else:
+        enemy_towers = {
+            "RADIANT_T1_TOP": RADIANT_T1_TOP,
+            "RADIANT_T1_MID": RADIANT_T1_MID,
+            "RADIANT_T1_BOT": RADIANT_T1_BOT,
+            "RADIANT_T2_TOP": RADIANT_T2_TOP,
+            "RADIANT_T2_MID": RADIANT_T2_MID,
+            "RADIANT_T2_BOT": RADIANT_T2_BOT,
+        }
+
+    if pos is not None:
+        px, py = pos
+        for tower_name, (tx, ty) in enemy_towers.items():
+            dist = _math.sqrt((px - tx) ** 2 + (py - ty) ** 2)
+            if dist <= DIVE_RADIUS:
+                return DeathCause.DIVE, f"died near {tower_name} at {death_time_min:.1f}min"
+
+    # ------------------------------------------------------------------
+    # 3. GANK_RUNE — died close to a rune spawn location
+    # ------------------------------------------------------------------
+    if pos is not None:
+        px, py = pos
+        for rx, ry in _RUNE_SPOTS:
+            dist = _math.sqrt((px - rx) ** 2 + (py - ry) ** 2)
+            if dist <= _RUNE_RADIUS:
+                return DeathCause.GANK_RUNE, f"near rune location at {death_time_min:.1f}min"
+
+    # ------------------------------------------------------------------
+    # 4. NO_TP_RESPONSE — a tower fell in the 90s before death and our
+    #    player did not buy a TP scroll in that window
+    # ------------------------------------------------------------------
+    window_start = death_time - _TP_WINDOW_SECS
+    recent_tower_kills = [
+        r for r in records
+        if r.get("type") == "DOTA_COMBATLOG_TEAM_BUILDING_KILL"
+        and "tower" in r.get("targetname", "")
+        and window_start <= r.get("time", -1) <= death_time
+    ]
+    if recent_tower_kills:
+        tp_purchased = any(
+            r for r in records
+            if r.get("type") == "DOTA_COMBATLOG_PURCHASE"
+            and r.get("targetname") == our_npc_name
+            and r.get("valuename") == "item_tpscroll"
+            and window_start <= r.get("time", -1) <= death_time
+        )
+        if not tp_purchased:
+            earliest_tower = min(recent_tower_kills, key=lambda r: r["time"])
+            tower_time_min = earliest_tower["time"] / 60.0
+            return (
+                DeathCause.NO_TP_RESPONSE,
+                f"tower fell at {tower_time_min:.1f}min, no TP purchased",
+            )
+
+    # ------------------------------------------------------------------
+    # 5. OVEREXTENSION — died in enemy territory
+    # ------------------------------------------------------------------
+    if pos is not None:
+        px, py = pos
+        diagonal = px + py
+        in_enemy_half = (diagonal > _MAP_DIAGONAL) if our_team_radiant else (diagonal < _MAP_DIAGONAL)
+        if in_enemy_half:
+            return DeathCause.OVEREXTENSION, f"died in enemy territory at {death_time_min:.1f}min"
+
+    # ------------------------------------------------------------------
+    # 6. UNKNOWN
+    # ------------------------------------------------------------------
+    return DeathCause.UNKNOWN, ""
 
 
 def _npc_name_from_unit(unit: str) -> str:
@@ -180,6 +352,9 @@ def extract_metrics(
     else:
         result = "win" if our_meta.get("win") else "loss"
 
+    # Hoist teamfights_meta so it can be used for death classification below.
+    teamfights_meta = match_meta.get("teamfights") or []
+
     # --- Step 6: deaths ---
     hero_deaths = [
         r for r in records
@@ -190,6 +365,18 @@ def extract_metrics(
     ]
     deaths_before_10 = [d for d in hero_deaths if d["time"] < 600]
     death_timestamps_laning = sorted(d["time"] / 60.0 for d in deaths_before_10)
+
+    death_events: list[DeathEvent] = []
+    for d in deaths_before_10:
+        cause, detail = _classify_death(
+            d, our_parser_slot, records, teamfights_meta, our_npc_name, our_team_radiant
+        )
+        death_events.append(DeathEvent(
+            time_minutes=d["time"] / 60.0,
+            killer=d.get("attackername", "unknown"),
+            cause=cause,
+            cause_detail=detail,
+        ))
 
     # --- Step 7: purchases ---
     our_purchases = [
@@ -276,7 +463,7 @@ def extract_metrics(
 
     # initiation_rate: fraction of participated fights where our player dealt the first hero damage
     # Uses match_meta teamfights[] for fight windows + parser damage records for timing
-    teamfights_meta = match_meta.get("teamfights") or []
+    # (teamfights_meta already collected above for death classification)
     fights_participated = 0
     fights_initiated = 0
     for fight in teamfights_meta:
@@ -356,6 +543,7 @@ def extract_metrics(
         tower_damage=tower_damage_val,
         initiation_rate=initiation_rate_val,
         turbo=match_meta.get("game_mode") == 23,
+        death_events=death_events,
     )
 
 

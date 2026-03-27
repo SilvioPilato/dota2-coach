@@ -5,7 +5,7 @@ import warnings
 from typing import Optional
 
 from dota_coach import config
-from dota_coach.models import ChatRequest, DetectedError, EnrichmentContext, HeroBenchmark, MatchMetrics
+from dota_coach.models import ChatRequest, DeathEvent, DetectedError, EnrichmentContext, HeroBenchmark, MatchMetrics
 from dota_coach.role import ROLE_LABELS
 
 _TOKEN_BUDGET = config.TOKEN_BUDGET
@@ -200,11 +200,21 @@ def build_user_message(
         lines.append(f"- Participation: {metrics.teamfight_participation_rate:.0%}")
     else:
         lines.append("- Participation: N/A")
-    death_detail = ""
-    if metrics.deaths_before_10 > 0:
-        timestamps = ", ".join(f"{t:.1f}" for t in metrics.death_timestamps_laning)
-        death_detail = f" (at {timestamps} min)"
-    lines.append(f"- Deaths before 10 min: {metrics.deaths_before_10}{death_detail}")
+    laning_death_events = [de for de in metrics.death_events if de.time_minutes < 10]
+    if laning_death_events:
+        lines.append(f"- Deaths before 10 min: {metrics.deaths_before_10}")
+        for de in laning_death_events:
+            t = de.time_minutes
+            mm, ss = int(t * 60) // 60, int(t * 60) % 60
+            cause_str = de.cause.value.replace("_", " ").title()
+            detail = f" ({de.cause_detail})" if de.cause_detail else ""
+            lines.append(f"  - {mm:02d}:{ss:02d} — {cause_str}{detail}")
+    else:
+        death_detail = ""
+        if metrics.deaths_before_10 > 0:
+            timestamps = ", ".join(f"{t:.1f}" for t in metrics.death_timestamps_laning)
+            death_detail = f" (at {timestamps} min)"
+        lines.append(f"- Deaths before 10 min: {metrics.deaths_before_10}{death_detail}")
     lines.append("")
 
     # --- PATCH CONTEXT block (when enrichment available) ---
@@ -267,7 +277,16 @@ def _build_chat_system_prompt(ctx: "MatchReport") -> str:
     lines.append("MATCH METRICS:")
     lines.append(f"Hero: {m.hero} | Role: pos {ctx.role} ({role_label}) | Result: {m.result.upper()} | Duration: {m.duration_minutes:.0f} min")
     lines.append(f"GPM: {m.gpm} | XPM: {m.xpm} | LH@10: {m.lh_at_10} | Denies@10: {m.denies_at_10}")
-    lines.append(f"Deaths before 10: {m.deaths_before_10}")
+    if m.death_events:
+        lines.append(f"Deaths before 10: {m.deaths_before_10}")
+        for de in m.death_events:
+            cause_str = de.cause.value.replace("_", " ").title()
+            detail = f" — {de.cause_detail}" if de.cause_detail else ""
+            t = de.time_minutes
+            mm, ss = int(t * 60) // 60, int(t * 60) % 60
+            lines.append(f"  {mm:02d}:{ss:02d} {cause_str}{detail}")
+    else:
+        lines.append(f"Deaths before 10: {m.deaths_before_10}")
     lines.append("")
 
     # Errors block

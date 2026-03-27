@@ -5,6 +5,7 @@ from typing import Optional
 
 from dota_coach import config
 from dota_coach.models import (
+    DeathCause,
     DetectedError,
     EnrichmentContext,
     HeroBenchmark,
@@ -372,5 +373,33 @@ def detect_errors(
                     metric_value=f"{metrics.first_core_item_name} at {metrics.first_core_item_minute:.1f} min",
                     threshold=f"> {config.SLOW_CORE_ITEM_MINUTES:.0f} min is slow farm",
                 ))
+
+    # ===================================================================
+    # DEATH CAUSE RULES (require death_events populated by _classify_death)
+    # ===================================================================
+
+    # D1: Repeated gank/rune deaths
+    gank_rune_deaths = [d for d in metrics.death_events if d.cause == DeathCause.GANK_RUNE]
+    if len(gank_rune_deaths) >= 2:
+        n = len(gank_rune_deaths)
+        errors.append(DetectedError(
+            category="Rune area ganks",
+            description=f"Died {n} times near rune spots — predictable rotations exploiting your rune habit",
+            severity="high",
+            metric_value=f"{n} GANK_RUNE deaths before 10:00",
+            threshold=">= 2 rune-area deaths is a pattern",
+        ))
+
+    # D2: Repeated overextension deaths
+    overextension_deaths = [d for d in metrics.death_events if d.cause == DeathCause.OVEREXTENSION]
+    if len(overextension_deaths) >= 2:
+        n = len(overextension_deaths)
+        errors.append(DetectedError(
+            category="Overextension",
+            description=f"Died {n} times while overextended into enemy territory",
+            severity="high",
+            metric_value=f"{n} overextension deaths before 10:00",
+            threshold=">= 2 overextension deaths is a positioning pattern",
+        ))
 
     return sorted(errors, key=lambda e: _SEVERITY_ORDER[e.severity])[:3]
