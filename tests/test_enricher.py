@@ -160,6 +160,8 @@ class TestEnrich:
         monkeypatch.setattr("dota_coach.enricher.CACHE_DIR", tmp_path)
 
         async def mock_fetch(url):
+            if "itemTimings" in url:
+                return []
             if "heroes" in url:
                 return FAKE_HEROES
             if "items" in url:
@@ -182,6 +184,7 @@ class TestEnrich:
         _write_cache("heroes.json", FAKE_HEROES)
         _write_cache("items.json", FAKE_ITEMS)
         _write_cache("benchmarks_6.json", FAKE_BENCHMARKS)
+        _write_cache("item_timings_6.json", [])
 
         mock_fetch = AsyncMock(side_effect=AssertionError("should not be called"))
         mock_bench = AsyncMock(side_effect=AssertionError("should not be called"))
@@ -212,6 +215,8 @@ class TestEnrich:
         monkeypatch.setattr("dota_coach.enricher.CACHE_DIR", tmp_path)
 
         async def mock_fetch(url):
+            if "itemTimings" in url:
+                return []
             if "heroes" in url:
                 return FAKE_HEROES
             if "items" in url:

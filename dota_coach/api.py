@@ -103,7 +103,7 @@ async def analyze(req: AnalyzeRequest):
         from dota_coach.coach import CoachError, get_coaching
         from dota_coach.detector import detect_errors
         from dota_coach.downloader import ReplayExpiredError, download_and_decompress
-        from dota_coach.enricher import enrich
+        from dota_coach.enricher import enrich, get_core_items
         from dota_coach.extractor import build_timeline, extract_metrics
         from dota_coach.models import MatchReport
         from dota_coach.opendota import get_match, request_parse_and_wait
@@ -253,6 +253,8 @@ async def analyze(req: AnalyzeRequest):
         start_phase()
         yield step("enrich", "running", detail="Enriching with benchmarks")
 
+        core_items = await get_core_items()
+
         if degraded:
             from dota_coach.extractor import extract_metrics_from_opendota
             try:
@@ -262,7 +264,7 @@ async def analyze(req: AnalyzeRequest):
                 return
         else:
             try:
-                metrics = extract_metrics(records, account_id, match_meta)
+                metrics = extract_metrics(records, account_id, match_meta, core_items=core_items)
             except ValueError as exc:
                 yield step("enrich", "error", message=f"Extraction failed: {exc}")
                 return

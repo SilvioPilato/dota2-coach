@@ -12,13 +12,19 @@ from dota_coach.models import EnrichmentContext, HeroBenchmark
 from dota_coach.opendota import get_benchmarks
 
 CACHE_DIR = Path.home() / ".dota_coach" / "cache"
-BENCHMARKS_TTL = 3600 * 6   # 6 hours
-ITEMS_TTL = 3600 * 24 * 7   # 7 days
-HEROES_TTL = 3600 * 24 * 7  # 7 days
+BENCHMARKS_TTL = 3600 * 6       # 6 hours
+ITEMS_TTL = 3600 * 24 * 7       # 7 days
+HEROES_TTL = 3600 * 24 * 7      # 7 days
+ITEM_TIMINGS_TTL = 3600 * 24    # 24 hours — updates with new patch data
 
 _DOTACONSTANTS_BASE = (
     "https://raw.githubusercontent.com/odota/dotaconstants/master/build"
 )
+_OPENDOTA_BASE = "https://api.opendota.com/api"
+
+# Minimum cost (gold) for an item to be considered a "core" purchase.
+# Artifact-quality items below this threshold are minor components, not build-defining.
+_CORE_ITEM_MIN_COST = 2000
 
 
 def _ensure_cache_dir() -> None:
@@ -81,6 +87,53 @@ async def _get_benchmarks_cached(hero_id: int) -> dict:
     data = await get_benchmarks(hero_id)
     _write_cache(cache_name, data)
     return data
+
+
+async def _get_item_timings_cached(hero_id: int) -> list:
+    """Fetch per-hero item purchase timings from OpenDota (cached 24h).
+
+    Returns a list of dicts: [{item, time (seconds), games, wins}, ...]
+    sorted by ascending average purchase time.
+    """
+    cache_name = f"item_timings_{hero_id}.json"
+    cached = _read_cache(cache_name, ITEM_TIMINGS_TTL)
+    if cached is not None:
+        return cached
+    data = await _fetch_json(f"{_OPENDOTA_BASE}/heroes/{hero_id}/itemTimings")
+    _write_cache(cache_name, data)
+    return data
+
+
+def build_dynamic_core_items(items_data: dict) -> frozenset:
+    """Derive the set of core items from dotaconstants items.json.
+
+    Selects artifact-quality items that cost at least _CORE_ITEM_MIN_COST gold.
+    Returns parser-style names (e.g. ``item_bfury``, ``item_radiance``).
+    """
+    return frozenset(
+        f"item_{key}"
+        for key, info in items_data.items()
+        if isinstance(info, dict)
+        and info.get("qual") == "artifact"
+        and info.get("cost", 0) >= _CORE_ITEM_MIN_COST
+    )
+
+
+async def get_core_items() -> frozenset:
+    """Return live core items derived from dotaconstants, with disk caching.
+
+    Call this before ``extract_metrics`` to get a patch-current item set.
+    Falls back to the static ``detector.CORE_ITEMS`` frozenset on any error.
+    """
+    try:
+        items_data = await _get_items_data()
+        result = build_dynamic_core_items(items_data)
+        if result:
+            return result
+    except Exception:
+        pass
+    from dota_coach.detector import CORE_ITEMS
+    return CORE_ITEMS
 
 
 def _find_hero_id(hero_name: str, heroes_data: dict) -> int | None:
@@ -201,6 +254,14 @@ async def enrich(
                     )
                 )
 
+    # Fetch item timings for this hero (used for live timing benchmarks in detector)
+    item_timings: list = []
+    if hero_id is not None:
+        try:
+            item_timings = await _get_item_timings_cached(hero_id)
+        except Exception:
+            item_timings = []
+
     # Fetch items data
     items_data = await _get_items_data()
     item_costs: dict[str, int] = {}
@@ -230,4 +291,5 @@ async def enrich(
         item_costs=item_costs,
         hero_base_stats=hero_base_stats,
         bracket_source=bracket_source,
+        item_timings=item_timings,
     )

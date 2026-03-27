@@ -458,4 +458,45 @@ def detect_errors(
                 context=f"global median: {bench.bracket_avg:.0f} {label}",
             ))
 
+    # ===================================================================
+    # HERO ITEM TIMING CHECK (uses live community data from enrichment)
+    # ===================================================================
+    # Only runs when enrichment carries item_timings for the current hero.
+    # Compares the player's first core purchase against the community average.
+    # Falls back to hardcoded timing_minutes when live data is absent.
+    if (
+        enrichment is not None
+        and metrics.first_core_item_name is not None
+        and metrics.first_core_item_minute is not None
+        and metrics.hero in HERO_ITEM_PATHS
+    ):
+        timings_by_item: dict[str, dict] = {t["item"]: t for t in enrichment.item_timings}
+        for path in HERO_ITEM_PATHS[metrics.hero]:
+            key_item = path.items[0]                    # e.g. "battle_fury" (OpenDota name)
+            key_item_parser = f"item_{key_item}"        # e.g. "item_battle_fury" (parser name)
+            if metrics.first_core_item_name != key_item_parser:
+                continue
+            # Use live community average if we have enough games, otherwise hardcoded timing
+            community = timings_by_item.get(key_item)
+            if community and community.get("games", 0) >= 50:
+                reference_min = community["time"] / 60.0
+                source = "community avg"
+            else:
+                reference_min = float(path.timing_minutes)
+                source = "expected"
+            overshoot = metrics.first_core_item_minute - reference_min
+            if overshoot > path.timing_window:
+                sev = "critical" if overshoot > path.timing_window * 2 else "high"
+                errors.append(DetectedError(
+                    category="Slow item timing",
+                    description=(
+                        f"{key_item.replace('_', ' ').title()} arrived "
+                        f"{overshoot:.1f} min later than the {source} (~{reference_min:.0f} min)"
+                    ),
+                    severity=sev,
+                    metric_value=f"Purchased at {metrics.first_core_item_minute:.1f} min",
+                    threshold=f"Expected by ~{reference_min:.0f} min (±{path.timing_window})",
+                ))
+            break  # matched a path, stop checking
+
     return sorted(errors, key=lambda e: _SEVERITY_ORDER[e.severity])[:3]

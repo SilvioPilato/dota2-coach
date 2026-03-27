@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from dota_coach import coach, detector, downloader, extractor, opendota, parser, prompt
+from dota_coach.enricher import get_core_items
 
 app = typer.Typer(help="Dota 2 personal carry coach")
 console = Console()
@@ -116,7 +117,8 @@ async def _run_analyze(match_id: Optional[int], player_str: Optional[str], model
             raise typer.Exit(1)
 
     console.print("Extracting metrics...")
-    metrics = extractor.extract_metrics(records, account_id, match_meta)
+    core_items = await get_core_items()
+    metrics = extractor.extract_metrics(records, account_id, match_meta, core_items=core_items)
 
     errors = detector.detect_errors(metrics)
 

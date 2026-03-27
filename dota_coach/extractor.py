@@ -56,6 +56,7 @@ def extract_metrics(
     records: list[dict],
     our_account_id: int,
     match_meta: dict,
+    core_items: frozenset | None = None,
 ) -> MatchMetrics:
     """
     Maps odota parser NDJSON records to MatchMetrics.
@@ -64,8 +65,12 @@ def extract_metrics(
         records:        list of event dicts from parser.parse_replay()
         our_account_id: 32-bit OpenDota account ID of the player being analyzed
         match_meta:     dict from opendota.get_match() — provides player_slot, duration, etc.
+        core_items:     frozenset of parser item names to watch (e.g. ``item_bfury``).
+                        Defaults to the static ``detector.CORE_ITEMS`` if not provided.
+                        Pass the result of ``enricher.get_core_items()`` for patch-current data.
     """
     from dota_coach.detector import CORE_ITEMS
+    _core_items = core_items if core_items is not None else CORE_ITEMS
 
     # --- Step 1: find our player's parser slot ---
     # OpenDota match_meta players[] have 'account_id' and 'player_slot' (0-4 radiant, 128-132 dire)
@@ -197,7 +202,7 @@ def extract_metrics(
     ward_purchases = sum(1 for p in our_purchases if p.get("valuename") in WARD_ITEMS)
 
     core_purchases = [
-        p for p in our_purchases if p.get("valuename") in CORE_ITEMS
+        p for p in our_purchases if p.get("valuename") in _core_items
     ]
     if core_purchases:
         earliest = min(core_purchases, key=lambda p: p["time"])

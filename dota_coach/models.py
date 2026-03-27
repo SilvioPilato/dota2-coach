@@ -107,6 +107,7 @@ class EnrichmentContext(BaseModel):
     item_costs: dict[str, int]           # item_name → gold cost
     hero_base_stats: dict[str, float]    # base_damage, base_armor, etc.
     bracket_source: str = "global"       # reserved for v3 bracket-filtered
+    item_timings: list[dict] = []        # OpenDota /heroes/{id}/itemTimings — [{item, time, games, wins}]
 
 
 class DetectedError(BaseModel):
