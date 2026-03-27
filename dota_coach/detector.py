@@ -24,6 +24,17 @@ class ItemPath:
     timing_window: int      # acceptable ± deviation in minutes
 
 
+@dataclass
+class ItemPathMatch:
+    """Result of matching a hero's first core purchase against a known build path."""
+
+    path_name: str        # e.g. "standard", "battlefury", "radiance"
+    key_item: str         # dotaconstants item name, e.g. "battle_fury"
+    reference_min: float  # expected purchase minute (live community avg or hardcoded)
+    timing_window: int    # acceptable ± deviation in minutes
+    delta_min: float      # actual − reference (negative = bought early, positive = late)
+
+
 # Lookup table keyed by localized hero name (matches MatchMetrics.hero / OpenDota localized_name).
 # Each hero maps to one or more named build paths with timing expectations.
 HERO_ITEM_PATHS: dict[str, list[ItemPath]] = {
@@ -226,6 +237,48 @@ _METRIC_LABELS = {
     "xp_per_min": "XPM",
     "last_hits_per_min": "LH/min",
 }
+
+
+def detect_item_path(
+    hero: str,
+    first_core_item_name: Optional[str],
+    first_core_item_minute: Optional[float],
+    item_timings: list[dict],
+) -> Optional[ItemPathMatch]:
+    """Match the player's first core item against known build paths for the hero.
+
+    Returns an ItemPathMatch describing which path was detected and how the
+    player's timing compared to the community average (or hardcoded fallback).
+
+    Returns None when:
+    - ``hero`` has no entry in HERO_ITEM_PATHS
+    - ``first_core_item_name`` or ``first_core_item_minute`` are absent
+    - no path's key item matches ``first_core_item_name``
+    """
+    if not first_core_item_name or first_core_item_minute is None:
+        return None
+    if hero not in HERO_ITEM_PATHS:
+        return None
+
+    timings_by_item: dict[str, dict] = {t["item"]: t for t in item_timings}
+
+    for path in HERO_ITEM_PATHS[hero]:
+        key_item = path.items[0]                    # dotaconstants name, e.g. "battle_fury"
+        if first_core_item_name != f"item_{key_item}":
+            continue
+        community = timings_by_item.get(key_item)
+        if community and community.get("games", 0) >= 50:
+            reference_min = community["time"] / 60.0
+        else:
+            reference_min = float(path.timing_minutes)
+        return ItemPathMatch(
+            path_name=path.name,
+            key_item=key_item,
+            reference_min=reference_min,
+            timing_window=path.timing_window,
+            delta_min=first_core_item_minute - reference_min,
+        )
+    return None
 
 
 def detect_errors(
@@ -461,42 +514,26 @@ def detect_errors(
     # ===================================================================
     # HERO ITEM TIMING CHECK (uses live community data from enrichment)
     # ===================================================================
-    # Only runs when enrichment carries item_timings for the current hero.
-    # Compares the player's first core purchase against the community average.
-    # Falls back to hardcoded timing_minutes when live data is absent.
-    if (
-        enrichment is not None
-        and metrics.first_core_item_name is not None
-        and metrics.first_core_item_minute is not None
-        and metrics.hero in HERO_ITEM_PATHS
-    ):
-        timings_by_item: dict[str, dict] = {t["item"]: t for t in enrichment.item_timings}
-        for path in HERO_ITEM_PATHS[metrics.hero]:
-            key_item = path.items[0]                    # e.g. "battle_fury" (OpenDota name)
-            key_item_parser = f"item_{key_item}"        # e.g. "item_battle_fury" (parser name)
-            if metrics.first_core_item_name != key_item_parser:
-                continue
-            # Use live community average if we have enough games, otherwise hardcoded timing
-            community = timings_by_item.get(key_item)
-            if community and community.get("games", 0) >= 50:
-                reference_min = community["time"] / 60.0
-                source = "community avg"
-            else:
-                reference_min = float(path.timing_minutes)
-                source = "expected"
-            overshoot = metrics.first_core_item_minute - reference_min
-            if overshoot > path.timing_window:
-                sev = "critical" if overshoot > path.timing_window * 2 else "high"
-                errors.append(DetectedError(
-                    category="Slow item timing",
-                    description=(
-                        f"{key_item.replace('_', ' ').title()} arrived "
-                        f"{overshoot:.1f} min later than the {source} (~{reference_min:.0f} min)"
-                    ),
-                    severity=sev,
-                    metric_value=f"Purchased at {metrics.first_core_item_minute:.1f} min",
-                    threshold=f"Expected by ~{reference_min:.0f} min (±{path.timing_window})",
-                ))
-            break  # matched a path, stop checking
+    if enrichment is not None:
+        path_match = detect_item_path(
+            metrics.hero,
+            metrics.first_core_item_name,
+            metrics.first_core_item_minute,
+            enrichment.item_timings,
+        )
+        if path_match is not None and path_match.delta_min > path_match.timing_window:
+            sev = "critical" if path_match.delta_min > path_match.timing_window * 2 else "high"
+            source = "community avg" if enrichment.item_timings else "expected"
+            errors.append(DetectedError(
+                category="Slow item timing",
+                description=(
+                    f"{path_match.key_item.replace('_', ' ').title()} arrived "
+                    f"{path_match.delta_min:.1f} min later than the {source} "
+                    f"(~{path_match.reference_min:.0f} min)"
+                ),
+                severity=sev,
+                metric_value=f"Purchased at {metrics.first_core_item_minute:.1f} min",
+                threshold=f"Expected by ~{path_match.reference_min:.0f} min (±{path_match.timing_window})",
+            ))
 
     return sorted(errors, key=lambda e: _SEVERITY_ORDER[e.severity])[:3]
