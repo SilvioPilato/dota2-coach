@@ -45,6 +45,19 @@ query HeroBracketBenchmarks($heroIds: [Short], $bracketIds: [RankBracketBasicEnu
 }
 """
 
+_ITEM_BOOTSTRAP_QUERY = """
+query HeroItemBootstrap($heroId: Short!, $bracket: RankBracketBasicEnum!) {
+  heroStats {
+    itemBootstrap(heroId: $heroId, bracketBasicIds: [$bracket]) {
+      itemId
+      winCount
+      matchCount
+      avgTime
+    }
+  }
+}
+"""
+
 logger = logging.getLogger(__name__)
 
 
@@ -138,6 +151,64 @@ async def get_hero_bracket_benchmarks(
     except (KeyError, TypeError) as exc:
         logger.warning("Unexpected STRATZ benchmark response shape for hero %s: %s", hero_id, exc)
         return None
+
+
+async def get_hero_item_bootstrap(hero_id: int, bracket: str) -> list[dict]:
+    """Fetch item bootstrap data from STRATZ for a given hero + bracket.
+
+    Returns a list of dicts with keys itemId, winCount, matchCount, avgTime.
+    Returns [] on any error or if STRATZ_API_KEY is not set.
+
+    Args:
+        hero_id: OpenDota/Dota2 hero ID
+        bracket:  STRATZ RankBracketBasicEnum value, e.g. "LEGEND_ANCIENT"
+    """
+    api_key = os.environ.get("STRATZ_API_KEY", "").strip()
+    if not api_key:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                STRATZ_GRAPHQL_URL,
+                json={
+                    "query": _ITEM_BOOTSTRAP_QUERY,
+                    "variables": {"heroId": hero_id, "bracket": bracket},
+                },
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "STRATZ_API",
+                },
+            )
+            if not response.is_success:
+                logger.warning(
+                    "STRATZ item bootstrap request failed for hero %s: HTTP %s — %s",
+                    hero_id, response.status_code, response.text[:500],
+                )
+                return []
+            data = response.json()
+    except Exception as exc:
+        logger.warning("STRATZ item bootstrap request failed for hero %s: %s", hero_id, exc)
+        return []
+
+    if "errors" in data:
+        logger.warning(
+            "STRATZ item bootstrap GraphQL errors for hero %s: %s",
+            hero_id, data["errors"],
+        )
+        return []
+
+    try:
+        result = data["data"]["heroStats"]["itemBootstrap"]
+    except (KeyError, TypeError) as exc:
+        logger.warning("Unexpected STRATZ item bootstrap response shape for hero %s: %s", hero_id, exc)
+        return []
+
+    if result is None or not isinstance(result, list):
+        return []
+
+    return result
 
 
 async def get_match_positions(match_id: int) -> dict[int, int] | None:

@@ -1,7 +1,6 @@
 """Carry mistake detection with threshold rules (v2: percentile-based, role-aware)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Optional
 
 from dota_coach import config
@@ -13,148 +12,6 @@ from dota_coach.models import (
     RoleProfile,
 )
 
-
-@dataclass
-class ItemPath:
-    """Describes a hero's item build path and expected timing for the first key item."""
-
-    name: str               # path identifier, e.g. "standard", "radiance", "battlefury"
-    items: list[str]        # required items (OpenDota item names, e.g. "battle_fury", "manta")
-    timing_minutes: int     # target minute for the first key item
-    timing_window: int      # acceptable ± deviation in minutes
-
-
-@dataclass
-class ItemPathMatch:
-    """Result of matching a hero's first core purchase against a known build path."""
-
-    path_name: str        # e.g. "standard", "battlefury", "radiance"
-    key_item: str         # dotaconstants item name, e.g. "battle_fury"
-    reference_min: float  # expected purchase minute (live community avg or hardcoded)
-    timing_window: int    # acceptable ± deviation in minutes
-    delta_min: float      # actual − reference (negative = bought early, positive = late)
-
-
-# Lookup table keyed by localized hero name (matches MatchMetrics.hero / OpenDota localized_name).
-# Each hero maps to one or more named build paths with timing expectations.
-HERO_ITEM_PATHS: dict[str, list[ItemPath]] = {
-    "Anti-Mage": [
-        ItemPath(
-            name="standard",
-            items=["battle_fury", "manta", "butterfly"],
-            timing_minutes=17,
-            timing_window=4,
-        ),
-    ],
-    "Juggernaut": [
-        ItemPath(
-            name="battlefury",
-            items=["battle_fury", "manta", "butterfly"],
-            timing_minutes=18,
-            timing_window=4,
-        ),
-        ItemPath(
-            name="mjollnir",
-            items=["maelstrom", "mjollnir", "manta"],
-            timing_minutes=18,
-            timing_window=4,
-        ),
-    ],
-    "Phantom Assassin": [
-        ItemPath(
-            name="desolator",
-            items=["desolator", "black_king_bar"],
-            timing_minutes=18,
-            timing_window=4,
-        ),
-        ItemPath(
-            name="battlefury",
-            items=["battle_fury", "desolator"],
-            timing_minutes=20,
-            timing_window=4,
-        ),
-    ],
-    "Drow Ranger": [
-        ItemPath(
-            name="standard",
-            items=["dragon_lance", "manta", "silver_edge"],
-            timing_minutes=20,
-            timing_window=4,
-        ),
-    ],
-    "Terrorblade": [
-        ItemPath(
-            name="standard",
-            items=["manta", "sange_and_yasha", "butterfly"],
-            timing_minutes=20,
-            timing_window=4,
-        ),
-    ],
-    "Medusa": [
-        ItemPath(
-            name="radiance",
-            items=["radiance", "manta", "skadi"],
-            timing_minutes=22,
-            timing_window=4,
-        ),
-    ],
-    "Faceless Void": [
-        ItemPath(
-            name="battlefury",
-            items=["battle_fury", "mask_of_madness"],
-            timing_minutes=18,
-            timing_window=4,
-        ),
-        ItemPath(
-            name="maelstrom",
-            items=["maelstrom", "mask_of_madness", "mjollnir"],
-            timing_minutes=16,
-            timing_window=4,
-        ),
-    ],
-    "Wraith King": [
-        ItemPath(
-            name="radiance",
-            items=["radiance", "armlet", "assault"],
-            timing_minutes=20,
-            timing_window=4,
-        ),
-        ItemPath(
-            name="armlet",
-            items=["armlet", "black_king_bar"],
-            timing_minutes=12,
-            timing_window=4,
-        ),
-    ],
-    "Luna": [
-        ItemPath(
-            name="mask_of_madness",
-            items=["mask_of_madness", "dragon_lance", "manta"],
-            timing_minutes=12,
-            timing_window=4,
-        ),
-        ItemPath(
-            name="manta",
-            items=["dragon_lance", "manta", "butterfly"],
-            timing_minutes=22,
-            timing_window=4,
-        ),
-    ],
-    "Slark": [
-        ItemPath(
-            name="echo_sabre",
-            items=["echo_sabre", "diffusal_blade"],
-            timing_minutes=18,
-            timing_window=4,
-        ),
-        ItemPath(
-            name="diffusal_blade",
-            items=["diffusal_blade", "sange_and_yasha"],
-            timing_minutes=18,
-            timing_window=4,
-        ),
-    ],
-}
 
 CORE_ITEMS: frozenset[str] = frozenset({
     # Farming / tempo items
@@ -237,48 +94,6 @@ _METRIC_LABELS = {
     "xp_per_min": "XPM",
     "last_hits_per_min": "LH/min",
 }
-
-
-def detect_item_path(
-    hero: str,
-    first_core_item_name: Optional[str],
-    first_core_item_minute: Optional[float],
-    item_timings: list[dict],
-) -> Optional[ItemPathMatch]:
-    """Match the player's first core item against known build paths for the hero.
-
-    Returns an ItemPathMatch describing which path was detected and how the
-    player's timing compared to the community average (or hardcoded fallback).
-
-    Returns None when:
-    - ``hero`` has no entry in HERO_ITEM_PATHS
-    - ``first_core_item_name`` or ``first_core_item_minute`` are absent
-    - no path's key item matches ``first_core_item_name``
-    """
-    if not first_core_item_name or first_core_item_minute is None:
-        return None
-    if hero not in HERO_ITEM_PATHS:
-        return None
-
-    timings_by_item: dict[str, dict] = {t["item"]: t for t in item_timings}
-
-    for path in HERO_ITEM_PATHS[hero]:
-        key_item = path.items[0]                    # dotaconstants name, e.g. "battle_fury"
-        if first_core_item_name != f"item_{key_item}":
-            continue
-        community = timings_by_item.get(key_item)
-        if community and community.get("games", 0) >= 50:
-            reference_min = community["time"] / 60.0
-        else:
-            reference_min = float(path.timing_minutes)
-        return ItemPathMatch(
-            path_name=path.name,
-            key_item=key_item,
-            reference_min=reference_min,
-            timing_window=path.timing_window,
-            delta_min=first_core_item_minute - reference_min,
-        )
-    return None
 
 
 def detect_errors(
@@ -512,28 +327,50 @@ def detect_errors(
             ))
 
     # ===================================================================
-    # HERO ITEM TIMING CHECK (uses live community data from enrichment)
+    # ITEM TIMING CHECK (bootstrap-driven, v2 only)
     # ===================================================================
-    if enrichment is not None:
-        path_match = detect_item_path(
-            metrics.hero,
-            metrics.first_core_item_name,
-            metrics.first_core_item_minute,
-            enrichment.item_timings,
-        )
-        if path_match is not None and path_match.delta_min > path_match.timing_window:
-            sev = "critical" if path_match.delta_min > path_match.timing_window * 2 else "high"
-            source = "community avg" if enrichment.item_timings else "expected"
-            errors.append(DetectedError(
-                category="Slow item timing",
-                description=(
-                    f"{path_match.key_item.replace('_', ' ').title()} arrived "
-                    f"{path_match.delta_min:.1f} min later than the {source} "
-                    f"(~{path_match.reference_min:.0f} min)"
-                ),
-                severity=sev,
-                metric_value=f"Purchased at {metrics.first_core_item_minute:.1f} min",
-                threshold=f"Expected by ~{path_match.reference_min:.0f} min (±{path_match.timing_window})",
-            ))
+    # Uses Stratz heroItemBootstrap avg_time_minutes as the timing target.
+    # Falls back to config.SLOW_CORE_ITEM_MINUTES when bootstrap is empty.
+    if enrichment is not None and metrics.first_core_item_minute is not None:
+        _TIMING_WINDOW = 4  # minutes of acceptable deviation
+        bootstrap = enrichment.hero_item_bootstrap
+        first_item_key = (metrics.first_core_item_name or "").removeprefix("item_")
+
+        if bootstrap:
+            matched = next(
+                (e for e in bootstrap if e.item_name == first_item_key), None
+            )
+            if matched:
+                overshoot = metrics.first_core_item_minute - matched.avg_time_minutes
+                if overshoot > _TIMING_WINDOW:
+                    sev = "critical" if overshoot > _TIMING_WINDOW * 2 else "high"
+                    errors.append(DetectedError(
+                        category="Slow item timing",
+                        description=(
+                            f"{first_item_key.replace('_', ' ').title()} arrived "
+                            f"{overshoot:.1f} min later than the bracket average "
+                            f"(~{matched.avg_time_minutes:.0f} min, "
+                            f"{matched.match_frequency:.0%} of {metrics.hero} games)"
+                        ),
+                        severity=sev,
+                        metric_value=f"Purchased at {metrics.first_core_item_minute:.1f} min",
+                        threshold=f"Expected by ~{matched.avg_time_minutes:.0f} min (±{_TIMING_WINDOW})",
+                    ))
+            else:
+                # Non-standard build — note it but don't penalise
+                enrichment.build_note = (
+                    f"Non-standard first item: {metrics.first_core_item_name} "
+                    f"(not in top builds for this hero/bracket)"
+                )
+        else:
+            # Bootstrap unavailable (no Stratz key or fetch failed) — universal fallback
+            if metrics.first_core_item_minute > config.SLOW_CORE_ITEM_MINUTES:
+                errors.append(DetectedError(
+                    category="Slow core item",
+                    description=f"First core item purchased after {config.SLOW_CORE_ITEM_MINUTES:.0f} minutes",
+                    severity="high",
+                    metric_value=f"{metrics.first_core_item_name} at {metrics.first_core_item_minute:.1f} min",
+                    threshold=f"> {config.SLOW_CORE_ITEM_MINUTES:.0f} min is slow farm",
+                ))
 
     return sorted(errors, key=lambda e: _SEVERITY_ORDER[e.severity])[:3]

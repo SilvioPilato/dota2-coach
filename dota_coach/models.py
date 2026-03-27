@@ -100,6 +100,15 @@ class HeroBenchmark(BaseModel):
     bracket_avg: float       # value at ~50th percentile
 
 
+class ItemBootstrapEntry(BaseModel):
+    """A single entry from Stratz heroItemBootstrap, filtered and resolved."""
+    item_id: int
+    item_name: str           # dotaconstants short name, e.g. "bfury", "radiance"
+    match_frequency: float   # matchCount / total hero+bracket matches (0.0–1.0)
+    win_rate: float          # winCount / matchCount
+    avg_time_minutes: float  # avgTime from Stratz (seconds) converted to minutes
+
+
 class EnrichmentContext(BaseModel):
     """External context injected into prompts by the enricher."""
     patch_name: str
@@ -108,6 +117,8 @@ class EnrichmentContext(BaseModel):
     hero_base_stats: dict[str, float]    # base_damage, base_armor, etc.
     bracket_source: str = "global"       # reserved for v3 bracket-filtered
     item_timings: list[dict] = []        # OpenDota /heroes/{id}/itemTimings — [{item, time, games, wins}]
+    hero_item_bootstrap: list[ItemBootstrapEntry] = []
+    build_note: Optional[str] = None     # set when first_core_item not found in bootstrap
 
 
 class DetectedError(BaseModel):

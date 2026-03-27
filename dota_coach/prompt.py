@@ -5,7 +5,6 @@ import warnings
 from typing import Optional
 
 from dota_coach import config
-from dota_coach.detector import detect_item_path
 from dota_coach.models import ChatRequest, DetectedError, EnrichmentContext, HeroBenchmark, MatchMetrics
 from dota_coach.role import ROLE_LABELS
 
@@ -151,17 +150,12 @@ def build_user_message(
         lines.append(_benchmark_line(benchmarks, "last_hits_per_min", "LH/min (total game)", lh_per_min))
         lines.append(f"- LH at 10 min: {metrics.lh_at_10}")
         if metrics.first_core_item_minute is not None:
-            path_match = detect_item_path(
-                metrics.hero,
-                metrics.first_core_item_name,
-                metrics.first_core_item_minute,
-                enrichment.item_timings if enrichment else [],
-            )
-            path_tag = f" [{path_match.path_name} path]" if path_match else ""
-            core_str = f"{metrics.first_core_item_name} at {metrics.first_core_item_minute:.1f} min{path_tag}"
+            core_str = f"{metrics.first_core_item_name} at {metrics.first_core_item_minute:.1f} min"
         else:
             core_str = "None purchased"
         lines.append(f"- First core: {core_str}")
+        if enrichment and enrichment.build_note:
+            lines.append(f"- Build note: {enrichment.build_note}")
         if metrics.enemy_carry_net_worth_at_10 > 0:
             delta_10 = metrics.net_worth_at_10 - metrics.enemy_carry_net_worth_at_10
             delta_20 = metrics.net_worth_at_20 - metrics.enemy_carry_net_worth_at_20

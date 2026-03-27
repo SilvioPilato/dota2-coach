@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from dota_coach.detector import HERO_ITEM_PATHS, SEVERITY_THRESHOLDS, detect_errors, detect_item_path
+from dota_coach.detector import SEVERITY_THRESHOLDS, detect_errors
 from dota_coach.models import (
     DetectedError,
     EnrichmentContext,
     HeroBenchmark,
+    ItemBootstrapEntry,
     MatchMetrics,
     RoleProfile,
 )
@@ -469,161 +470,111 @@ def test_v2_top3_limit_with_percentile_errors():
 
 
 # ---------------------------------------------------------------------------
-# detect_item_path
+# detect_errors item timing (bootstrap-driven)
 # ---------------------------------------------------------------------------
 
-class TestDetectItemPath:
-    """Unit tests for the detect_item_path() function."""
+def _bootstrap_entry(item_name: str, avg_time_minutes: float, match_frequency: float = 0.60) -> ItemBootstrapEntry:
+    return ItemBootstrapEntry(
+        item_id=1,
+        item_name=item_name,
+        match_frequency=match_frequency,
+        win_rate=0.55,
+        avg_time_minutes=avg_time_minutes,
+    )
 
-    def test_returns_none_for_unknown_hero(self):
-        result = detect_item_path("Sniper", "item_desolator", 18.0, [])
-        assert result is None
 
-    def test_returns_none_when_no_first_item(self):
-        result = detect_item_path("Anti-Mage", None, None, [])
-        assert result is None
-
-    def test_returns_none_when_first_item_not_in_any_path(self):
-        # Anti-Mage paths only watch battle_fury (bfury). desolator doesn't match.
-        result = detect_item_path("Anti-Mage", "item_desolator", 18.0, [])
-        assert result is None
-
-    def test_matches_correct_path_name(self):
-        # Anti-Mage standard path starts with battle_fury → parser name item_bfury
-        first_item = f"item_{HERO_ITEM_PATHS['Anti-Mage'][0].items[0]}"
-        result = detect_item_path("Anti-Mage", first_item, 17.0, [])
-        assert result is not None
-        assert result.path_name == "standard"
-        assert result.key_item == HERO_ITEM_PATHS["Anti-Mage"][0].items[0]
-
-    def test_delta_positive_when_late(self):
-        first_item = f"item_{HERO_ITEM_PATHS['Anti-Mage'][0].items[0]}"
-        reference = float(HERO_ITEM_PATHS["Anti-Mage"][0].timing_minutes)
-        result = detect_item_path("Anti-Mage", first_item, reference + 5.0, [])
-        assert result is not None
-        assert abs(result.delta_min - 5.0) < 0.01
-
-    def test_delta_negative_when_early(self):
-        first_item = f"item_{HERO_ITEM_PATHS['Anti-Mage'][0].items[0]}"
-        reference = float(HERO_ITEM_PATHS["Anti-Mage"][0].timing_minutes)
-        result = detect_item_path("Anti-Mage", first_item, reference - 3.0, [])
-        assert result is not None
-        assert result.delta_min < 0
-
-    def test_uses_live_timing_when_sufficient_games(self):
-        first_item = f"item_{HERO_ITEM_PATHS['Anti-Mage'][0].items[0]}"
-        key = HERO_ITEM_PATHS["Anti-Mage"][0].items[0]
-        live_timings = [{"item": key, "time": 900, "games": 500, "wins": 300}]  # 15 min
-        result = detect_item_path("Anti-Mage", first_item, 20.0, live_timings)
-        assert result is not None
-        assert abs(result.reference_min - 15.0) < 0.01
-        assert abs(result.delta_min - 5.0) < 0.01
-
-    def test_falls_back_to_hardcoded_when_insufficient_games(self):
-        first_item = f"item_{HERO_ITEM_PATHS['Anti-Mage'][0].items[0]}"
-        key = HERO_ITEM_PATHS["Anti-Mage"][0].items[0]
-        sparse_timings = [{"item": key, "time": 900, "games": 10, "wins": 5}]  # < 50 games
-        result = detect_item_path("Anti-Mage", first_item, 20.0, sparse_timings)
-        assert result is not None
-        assert result.reference_min == float(HERO_ITEM_PATHS["Anti-Mage"][0].timing_minutes)
-
-    def test_picks_correct_path_for_multi_path_hero(self):
-        # Juggernaut has "battlefury" and "mjollnir" paths
-        bf_item = f"item_{HERO_ITEM_PATHS['Juggernaut'][0].items[0]}"   # battlefury path
-        mael_item = f"item_{HERO_ITEM_PATHS['Juggernaut'][1].items[0]}" # mjollnir path
-        bf_result = detect_item_path("Juggernaut", bf_item, 18.0, [])
-        mael_result = detect_item_path("Juggernaut", mael_item, 16.0, [])
-        assert bf_result is not None and bf_result.path_name == "battlefury"
-        assert mael_result is not None and mael_result.path_name == "mjollnir"
-
-    def test_timing_window_preserved(self):
-        first_item = f"item_{HERO_ITEM_PATHS['Anti-Mage'][0].items[0]}"
-        result = detect_item_path("Anti-Mage", first_item, 17.0, [])
-        assert result is not None
-        assert result.timing_window == HERO_ITEM_PATHS["Anti-Mage"][0].timing_window
+def _enrichment_with_bootstrap(bootstrap: list[ItemBootstrapEntry]) -> EnrichmentContext:
+    return EnrichmentContext(
+        patch_name="7.38",
+        benchmarks=[],
+        item_costs={},
+        hero_base_stats={},
+        hero_item_bootstrap=bootstrap,
+    )
 
 
 class TestDetectErrorsItemTiming:
-    """Integration tests: detect_errors() slow item timing rule via detect_item_path."""
+    """Integration tests: detect_errors() slow item timing rule (bootstrap-driven)."""
 
-    def _enrichment_with_timings(self, item_timings: list[dict]) -> EnrichmentContext:
-        return EnrichmentContext(
-            patch_name="7.38",
-            benchmarks=[],
-            item_costs={},
-            hero_base_stats={},
-            item_timings=item_timings,
-        )
+    _TIMING_WINDOW = 4  # matches detector constant
 
     def test_no_error_when_on_time(self):
-        key = HERO_ITEM_PATHS["Anti-Mage"][0].items[0]
-        reference = float(HERO_ITEM_PATHS["Anti-Mage"][0].timing_minutes)
-        window = HERO_ITEM_PATHS["Anti-Mage"][0].timing_window
+        # Arrived exactly at avg — no overshoot
+        bootstrap = [_bootstrap_entry("battle_fury", 17.0)]
         errors = detect_errors(
             _base_metrics(
                 hero="Anti-Mage",
-                first_core_item_name=f"item_{key}",
-                first_core_item_minute=reference + window - 0.5,  # just inside window
+                first_core_item_name="item_battle_fury",
+                first_core_item_minute=17.0 + self._TIMING_WINDOW - 0.5,  # just inside window
             ),
-            enrichment=self._enrichment_with_timings([]),
+            enrichment=_enrichment_with_bootstrap(bootstrap),
         )
         assert all(e.category != "Slow item timing" for e in errors)
 
     def test_high_severity_when_moderately_late(self):
-        key = HERO_ITEM_PATHS["Anti-Mage"][0].items[0]
-        reference = float(HERO_ITEM_PATHS["Anti-Mage"][0].timing_minutes)
-        window = HERO_ITEM_PATHS["Anti-Mage"][0].timing_window
+        bootstrap = [_bootstrap_entry("battle_fury", 17.0)]
         errors = detect_errors(
             _base_metrics(
                 hero="Anti-Mage",
-                first_core_item_name=f"item_{key}",
-                first_core_item_minute=reference + window + 1.0,  # just outside window
+                first_core_item_name="item_battle_fury",
+                first_core_item_minute=17.0 + self._TIMING_WINDOW + 1.0,  # just outside window
             ),
-            enrichment=self._enrichment_with_timings([]),
+            enrichment=_enrichment_with_bootstrap(bootstrap),
         )
         timing_errors = [e for e in errors if e.category == "Slow item timing"]
         assert len(timing_errors) == 1
         assert timing_errors[0].severity == "high"
 
     def test_critical_severity_when_very_late(self):
-        key = HERO_ITEM_PATHS["Anti-Mage"][0].items[0]
-        reference = float(HERO_ITEM_PATHS["Anti-Mage"][0].timing_minutes)
-        window = HERO_ITEM_PATHS["Anti-Mage"][0].timing_window
+        bootstrap = [_bootstrap_entry("battle_fury", 17.0)]
         errors = detect_errors(
             _base_metrics(
                 hero="Anti-Mage",
-                first_core_item_name=f"item_{key}",
-                first_core_item_minute=reference + window * 2 + 1.0,
+                first_core_item_name="item_battle_fury",
+                first_core_item_minute=17.0 + self._TIMING_WINDOW * 2 + 1.0,
             ),
-            enrichment=self._enrichment_with_timings([]),
+            enrichment=_enrichment_with_bootstrap(bootstrap),
         )
         timing_errors = [e for e in errors if e.category == "Slow item timing"]
         assert len(timing_errors) == 1
         assert timing_errors[0].severity == "critical"
 
-    def test_uses_live_timing_from_enrichment(self):
-        key = HERO_ITEM_PATHS["Anti-Mage"][0].items[0]
-        window = HERO_ITEM_PATHS["Anti-Mage"][0].timing_window
-        live_timings = [{"item": key, "time": 900, "games": 500, "wins": 300}]  # 15 min ref
-        # Purchase at 15 + window + 1 = late vs live data
+    def test_no_error_for_non_standard_item_sets_build_note(self):
+        # bootstrap has battle_fury but player bought desolator — non-standard
+        bootstrap = [_bootstrap_entry("battle_fury", 17.0)]
+        enrichment = _enrichment_with_bootstrap(bootstrap)
         errors = detect_errors(
             _base_metrics(
                 hero="Anti-Mage",
-                first_core_item_name=f"item_{key}",
-                first_core_item_minute=15.0 + window + 1.0,
+                first_core_item_name="item_desolator",
+                first_core_item_minute=20.0,
             ),
-            enrichment=self._enrichment_with_timings(live_timings),
+            enrichment=enrichment,
         )
-        timing_errors = [e for e in errors if e.category == "Slow item timing"]
-        assert len(timing_errors) == 1
+        assert all(e.category != "Slow item timing" for e in errors)
+        assert enrichment.build_note is not None
+        assert "Non-standard" in enrichment.build_note
+
+    def test_fallback_slow_core_item_when_bootstrap_empty(self):
+        """When bootstrap is empty, falls back to config.SLOW_CORE_ITEM_MINUTES."""
+        enrichment = _enrichment_with_bootstrap([])
+        errors = detect_errors(
+            _base_metrics(
+                hero="Anti-Mage",
+                first_core_item_name="item_battle_fury",
+                first_core_item_minute=99.0,  # absurdly late
+            ),
+            enrichment=enrichment,
+        )
+        slow_errors = [e for e in errors if e.category == "Slow core item"]
+        assert len(slow_errors) == 1
 
     def test_no_error_without_enrichment(self):
         """Item timing check is skipped entirely in v1 mode (no enrichment)."""
-        key = HERO_ITEM_PATHS["Anti-Mage"][0].items[0]
         errors = detect_errors(
             _base_metrics(
                 hero="Anti-Mage",
-                first_core_item_name=f"item_{key}",
+                first_core_item_name="item_battle_fury",
                 first_core_item_minute=99.0,  # absurdly late
             ),
         )

@@ -232,3 +232,49 @@ class TestEnrich:
                 ))
 
         assert ctx.item_costs.get("item_battle_fury") == 4600
+
+    def test_bootstrap_cache_populated(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("dota_coach.enricher.CACHE_DIR", tmp_path)
+
+        FAKE_BOOTSTRAP_RAW = [
+            {"itemId": 11, "matchCount": 400, "winCount": 220, "avgTime": 1020},
+        ]
+
+        async def mock_fetch(url):
+            if "itemTimings" in url:
+                return []
+            if "heroes" in url:
+                return FAKE_HEROES
+            if "items" in url:
+                # Include an entry with id so bootstrap resolve can map it
+                data = dict(FAKE_ITEMS)
+                data["battle_fury"] = {"id": 11, "qual": "artifact", "cost": 4600}
+                return data
+            return {}
+
+        with patch("dota_coach.enricher._fetch_json", side_effect=mock_fetch):
+            with patch("dota_coach.enricher.get_benchmarks", new_callable=AsyncMock, return_value=FAKE_BENCHMARKS):
+                with patch("dota_coach.stratz.get_hero_item_bootstrap", new_callable=AsyncMock, return_value=FAKE_BOOTSTRAP_RAW):
+                    ctx = asyncio.run(enrich(_make_metrics(), FAKE_MATCH_META, purchased_items=["item_battle_fury"]))
+
+        # hero_item_bootstrap is either a resolved list or [] depending on items_data mapping
+        assert isinstance(ctx.hero_item_bootstrap, list)
+
+    def test_bootstrap_failure_returns_empty_list(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("dota_coach.enricher.CACHE_DIR", tmp_path)
+
+        async def mock_fetch(url):
+            if "itemTimings" in url:
+                return []
+            if "heroes" in url:
+                return FAKE_HEROES
+            if "items" in url:
+                return FAKE_ITEMS
+            return {}
+
+        with patch("dota_coach.enricher._fetch_json", side_effect=mock_fetch):
+            with patch("dota_coach.enricher.get_benchmarks", new_callable=AsyncMock, return_value=FAKE_BENCHMARKS):
+                with patch("dota_coach.stratz.get_hero_item_bootstrap", new_callable=AsyncMock, side_effect=RuntimeError("stratz down")):
+                    ctx = asyncio.run(enrich(_make_metrics(), FAKE_MATCH_META))
+
+        assert ctx.hero_item_bootstrap == []

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ BENCHMARKS_TTL = 3600 * 6       # 6 hours
 ITEMS_TTL = 3600 * 24 * 7       # 7 days
 HEROES_TTL = 3600 * 24 * 7      # 7 days
 ITEM_TIMINGS_TTL = 3600 * 24    # 24 hours — updates with new patch data
+BOOTSTRAP_TTL = 3600 * 24  # 24 hours
 
 _DOTACONSTANTS_BASE = (
     "https://raw.githubusercontent.com/odota/dotaconstants/master/build"
@@ -48,7 +50,9 @@ def _read_cache(name: str, ttl: int) -> dict | list | None:
 def _write_cache(name: str, data: Any) -> None:
     _ensure_cache_dir()
     path = CACHE_DIR / name
-    path.write_text(json.dumps(data), encoding="utf-8")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 async def _fetch_json(url: str) -> Any:
@@ -102,6 +106,76 @@ async def _get_item_timings_cached(hero_id: int) -> list:
     data = await _fetch_json(f"{_OPENDOTA_BASE}/heroes/{hero_id}/itemTimings")
     _write_cache(cache_name, data)
     return data
+
+
+async def _get_bootstrap_cached(hero_id: int, bracket: str) -> list:
+    """Fetch Stratz item bootstrap for a hero+bracket (cached 24h). Returns [] on any error."""
+    cache_name = f"bootstrap_{hero_id}_{bracket}.json"
+    cached = _read_cache(cache_name, BOOTSTRAP_TTL)
+    if cached is not None:
+        return cached
+    from dota_coach.stratz import get_hero_item_bootstrap
+    try:
+        data = await get_hero_item_bootstrap(hero_id, bracket)
+    except Exception:
+        data = []
+    _write_cache(cache_name, data)
+    return data
+
+
+def _resolve_bootstrap_entries(raw: list, items_data: dict) -> list:
+    """Convert raw Stratz bootstrap dicts to ItemBootstrapEntry list.
+
+    - Builds a reverse map: numeric item_id → dotaconstants short name
+    - Filters to match_frequency > 0.15
+    - Converts avgTime (seconds) → avg_time_minutes
+    - Returns [] if raw is empty or total_matches is 0
+    """
+    from dota_coach.models import ItemBootstrapEntry
+
+    if not raw:
+        return []
+
+    # Build id→name reverse map from items_data
+    id_to_name: dict[int, str] = {}
+    for key, info in items_data.items():
+        if isinstance(info, dict) and "id" in info:
+            try:
+                id_to_name[int(info["id"])] = key
+            except (ValueError, TypeError):
+                pass
+
+    total_matches = sum(entry.get("matchCount") or 0 for entry in raw)
+    if total_matches == 0:
+        return []
+
+    result = []
+    for entry in raw:
+        item_id = entry.get("itemId")
+        match_count = entry.get("matchCount") or 0
+        win_count = entry.get("winCount") or 0
+        avg_time = entry.get("avgTime") or 0
+
+        if not item_id or match_count == 0:
+            continue
+
+        item_name = id_to_name.get(int(item_id))
+        if not item_name:
+            continue  # unknown item, skip
+
+        match_frequency = match_count / total_matches
+        if match_frequency <= 0.15:
+            continue  # below threshold
+
+        result.append(ItemBootstrapEntry(
+            item_id=int(item_id),
+            item_name=item_name,
+            match_frequency=match_frequency,
+            win_rate=win_count / match_count,
+            avg_time_minutes=(avg_time or 0) / 60.0,
+        ))
+
+    return result
 
 
 def build_dynamic_core_items(items_data: dict) -> frozenset:
@@ -262,6 +336,18 @@ async def enrich(
         except Exception:
             item_timings = []
 
+    # Fetch Stratz item bootstrap for hero-aware timing targets
+    hero_item_bootstrap: list = []
+    if hero_id is not None:
+        try:
+            raw_bootstrap = await _get_bootstrap_cached(hero_id, bracket)
+            # items_data is fetched below; need it here too — reuse same call
+            # Note: we fetch items_data early here; the later fetch will hit cache
+            _items_for_bootstrap = await _get_items_data()
+            hero_item_bootstrap = _resolve_bootstrap_entries(raw_bootstrap, _items_for_bootstrap)
+        except Exception:
+            hero_item_bootstrap = []
+
     # Fetch items data
     items_data = await _get_items_data()
     item_costs: dict[str, int] = {}
@@ -292,4 +378,5 @@ async def enrich(
         hero_base_stats=hero_base_stats,
         bracket_source=bracket_source,
         item_timings=item_timings,
+        hero_item_bootstrap=hero_item_bootstrap,
     )
