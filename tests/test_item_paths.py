@@ -25,8 +25,8 @@ def _base_metrics(**overrides) -> MatchMetrics:
     defaults = dict(
         match_id=1, hero="Anti-Mage", duration_minutes=35.0, result="win",
         lh_at_10=50, denies_at_10=5, deaths_before_10=0, death_timestamps_laning=[],
-        net_worth_at_10=3500, enemy_carry_net_worth_at_10=3200,
-        net_worth_at_20=8000, enemy_carry_net_worth_at_20=7000,
+        net_worth_at_10=3500, opponent_net_worth_at_10=3200,
+        net_worth_at_20=8000, opponent_net_worth_at_20=7000,
         gpm=400, xpm=500, first_core_item_minute=17.0,
         first_core_item_name="item_battle_fury",
         laning_heatmap_own_half_pct=0.55, ward_purchases=0,

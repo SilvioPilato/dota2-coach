@@ -47,9 +47,11 @@ class MatchMetrics(BaseModel):
     deaths_before_10: int
     death_timestamps_laning: list[float]
     net_worth_at_10: int
-    enemy_carry_net_worth_at_10: int
     net_worth_at_20: int
-    enemy_carry_net_worth_at_20: int
+    opponent_net_worth_at_10: int          # enemy player with same lane_role
+    opponent_net_worth_at_20: int          # enemy player with same lane_role
+    team_net_worth_at_20: int = 0          # sum of all 5 allies at 20 min
+    enemy_team_net_worth_at_20: int = 0    # sum of all 5 enemies at 20 min
 
     # Farming
     gpm: int

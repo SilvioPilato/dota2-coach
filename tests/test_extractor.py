@@ -98,16 +98,16 @@ def test_net_worth_at_10(metrics):
     assert metrics.net_worth_at_10 == 2800
 
 
-def test_enemy_carry_net_worth_at_10(metrics):
-    assert metrics.enemy_carry_net_worth_at_10 == 4200
+def test_opponent_net_worth_at_10(metrics):
+    assert metrics.opponent_net_worth_at_10 == 4200
 
 
 def test_net_worth_at_20(metrics):
     assert metrics.net_worth_at_20 == 6200
 
 
-def test_enemy_carry_net_worth_at_20(metrics):
-    assert metrics.enemy_carry_net_worth_at_20 == 9500
+def test_opponent_net_worth_at_20(metrics):
+    assert metrics.opponent_net_worth_at_20 == 9500
 
 
 # ---------------------------------------------------------------------------

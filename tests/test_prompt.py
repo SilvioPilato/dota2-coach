@@ -22,9 +22,9 @@ def _make_metrics(**overrides) -> MatchMetrics:
         deaths_before_10=2,
         death_timestamps_laning=[3.83, 8.0],
         net_worth_at_10=2800,
-        enemy_carry_net_worth_at_10=4200,
+        opponent_net_worth_at_10=4200,
         net_worth_at_20=6200,
-        enemy_carry_net_worth_at_20=9500,
+        opponent_net_worth_at_20=9500,
         gpm=342,
         xpm=428,
         first_core_item_minute=19.17,
@@ -112,7 +112,7 @@ def test_user_message_contains_core_item():
 
 def test_user_message_contains_nw_delta():
     msg = build_user_message(_make_metrics(), [])
-    assert "Net worth delta" in msg
+    assert "NW delta" in msg
 
 
 def test_user_message_contains_teamfight_section_when_data_present():
@@ -180,12 +180,12 @@ def test_user_message_handles_no_core_item():
 
 def test_user_message_shows_negative_delta_when_behind():
     # Our NW 2800, enemy 4200 → delta = -1400
-    msg = build_user_message(_make_metrics(net_worth_at_10=2800, enemy_carry_net_worth_at_10=4200), [])
+    msg = build_user_message(_make_metrics(net_worth_at_10=2800, opponent_net_worth_at_10=4200), [])
     assert "-1400" in msg
 
 
 def test_user_message_shows_positive_delta_when_ahead():
-    msg = build_user_message(_make_metrics(net_worth_at_10=5000, enemy_carry_net_worth_at_10=3000), [])
+    msg = build_user_message(_make_metrics(net_worth_at_10=5000, opponent_net_worth_at_10=3000), [])
     assert "+2000" in msg
 
 
@@ -257,7 +257,7 @@ def test_system_prompt_each_role_has_different_example():
 
 def test_user_message_pos1_shows_nw_delta():
     msg = build_user_message(_make_metrics(), [], role=1)
-    assert "Net worth delta" in msg
+    assert "NW delta" in msg
 
 
 def test_user_message_pos5_shows_ward_placements():

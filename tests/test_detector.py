@@ -26,9 +26,9 @@ def _base_metrics(**overrides) -> MatchMetrics:
         deaths_before_10=0,
         death_timestamps_laning=[],
         net_worth_at_10=3500,
-        enemy_carry_net_worth_at_10=3200,
+        opponent_net_worth_at_10=3200,
         net_worth_at_20=8000,
-        enemy_carry_net_worth_at_20=7000,
+        opponent_net_worth_at_20=7000,
         gpm=400,
         xpm=500,
         first_core_item_minute=15.0,
@@ -165,22 +165,22 @@ def test_rule4_severity_is_high():
 # ---------------------------------------------------------------------------
 
 def test_rule5_fires_when_deficit_exceeds_1000():
-    errors = detect_errors(_base_metrics(net_worth_at_10=2000, enemy_carry_net_worth_at_10=3500))
+    errors = detect_errors(_base_metrics(net_worth_at_10=2000, opponent_net_worth_at_10=3500))
     assert "Net worth deficit at 10" in _categories(errors)
 
 
 def test_rule5_does_not_fire_at_exact_1000_deficit():
-    errors = detect_errors(_base_metrics(net_worth_at_10=2500, enemy_carry_net_worth_at_10=3500))
+    errors = detect_errors(_base_metrics(net_worth_at_10=2500, opponent_net_worth_at_10=3500))
     assert "Net worth deficit at 10" not in _categories(errors)
 
 
 def test_rule5_does_not_fire_when_ahead():
-    errors = detect_errors(_base_metrics(net_worth_at_10=4000, enemy_carry_net_worth_at_10=3000))
+    errors = detect_errors(_base_metrics(net_worth_at_10=4000, opponent_net_worth_at_10=3000))
     assert "Net worth deficit at 10" not in _categories(errors)
 
 
 def test_rule5_severity_is_high():
-    errors = detect_errors(_base_metrics(net_worth_at_10=2000, enemy_carry_net_worth_at_10=3500))
+    errors = detect_errors(_base_metrics(net_worth_at_10=2000, opponent_net_worth_at_10=3500))
     rule = next(e for e in errors if e.category == "Net worth deficit at 10")
     assert rule.severity == "high"
 
@@ -190,17 +190,17 @@ def test_rule5_severity_is_high():
 # ---------------------------------------------------------------------------
 
 def test_rule6_fires_when_deficit_exceeds_2500():
-    errors = detect_errors(_base_metrics(net_worth_at_20=5000, enemy_carry_net_worth_at_20=8000))
+    errors = detect_errors(_base_metrics(net_worth_at_20=5000, opponent_net_worth_at_20=8000))
     assert "Net worth deficit at 20" in _categories(errors)
 
 
 def test_rule6_does_not_fire_at_exact_2500_deficit():
-    errors = detect_errors(_base_metrics(net_worth_at_20=5500, enemy_carry_net_worth_at_20=8000))
+    errors = detect_errors(_base_metrics(net_worth_at_20=5500, opponent_net_worth_at_20=8000))
     assert "Net worth deficit at 20" not in _categories(errors)
 
 
 def test_rule6_severity_is_critical():
-    errors = detect_errors(_base_metrics(net_worth_at_20=5000, enemy_carry_net_worth_at_20=8000))
+    errors = detect_errors(_base_metrics(net_worth_at_20=5000, opponent_net_worth_at_20=8000))
     rule = next(e for e in errors if e.category == "Net worth deficit at 20")
     assert rule.severity == "critical"
 
@@ -313,7 +313,7 @@ def test_at_most_three_errors_returned():
         deaths_before_10=3,
         death_timestamps_laning=[2.0, 5.0, 8.0],
         net_worth_at_10=1000,
-        enemy_carry_net_worth_at_10=3000,
+        opponent_net_worth_at_10=3000,
         laning_heatmap_own_half_pct=0.80,
         ward_purchases=3,
     ))

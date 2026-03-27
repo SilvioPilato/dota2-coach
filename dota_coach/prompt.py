@@ -156,11 +156,14 @@ def build_user_message(
         lines.append(f"- First core: {core_str}")
         if enrichment and enrichment.build_note:
             lines.append(f"- Build note: {enrichment.build_note}")
-        if metrics.enemy_carry_net_worth_at_10 > 0:
-            delta_10 = metrics.net_worth_at_10 - metrics.enemy_carry_net_worth_at_10
-            delta_20 = metrics.net_worth_at_20 - metrics.enemy_carry_net_worth_at_20
-            lines.append(f"- Net worth delta at 10: {delta_10:+d}g vs opposing pos 1")
-            lines.append(f"- Net worth delta at 20: {delta_20:+d}g vs opposing pos 1")
+        if metrics.opponent_net_worth_at_10 > 0:
+            delta_10 = metrics.net_worth_at_10 - metrics.opponent_net_worth_at_10
+            delta_20 = metrics.net_worth_at_20 - metrics.opponent_net_worth_at_20
+            lines.append(f"- NW delta at 10: {delta_10:+d}g vs opposing same-role")
+            lines.append(f"- NW delta at 20: {delta_20:+d}g vs opposing same-role")
+        if metrics.team_net_worth_at_20 > 0 and metrics.enemy_team_net_worth_at_20 > 0:
+            team_delta = metrics.team_net_worth_at_20 - metrics.enemy_team_net_worth_at_20
+            lines.append(f"- Team NW at 20: {metrics.team_net_worth_at_20:,}g vs enemy {metrics.enemy_team_net_worth_at_20:,}g ({team_delta:+,}g)")
         if role == 2 and metrics.rune_control_pct is not None:
             lines.append(f"- Rune control: {metrics.rune_control_pct:.0%} of runes collected")
         if role == 2 and metrics.tower_damage is not None:

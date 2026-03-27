@@ -266,26 +266,42 @@ def detect_errors(
             ))
 
         # Rule 5: Net worth deficit at 10
-        delta_10 = metrics.enemy_carry_net_worth_at_10 - metrics.net_worth_at_10
+        delta_10 = metrics.opponent_net_worth_at_10 - metrics.net_worth_at_10
         if delta_10 > config.NW_DEFICIT_AT_10:
             errors.append(DetectedError(
                 category="Net worth deficit at 10",
-                description="Enemy carry has a significant gold lead at 10 minutes",
+                description="Same-role opponent has a significant gold lead at 10 minutes",
                 severity="high",
                 metric_value=f"{delta_10:+d}g deficit at 10:00",
                 threshold=f"> {config.NW_DEFICIT_AT_10}g deficit is a severe laning loss",
             ))
 
         # Rule 6: Net worth deficit at 20
-        delta_20 = metrics.enemy_carry_net_worth_at_20 - metrics.net_worth_at_20
+        delta_20 = metrics.opponent_net_worth_at_20 - metrics.net_worth_at_20
         if delta_20 > config.NW_DEFICIT_AT_20:
             errors.append(DetectedError(
                 category="Net worth deficit at 20",
-                description="Enemy carry is more than one major item ahead at 20 minutes",
+                description="Same-role opponent is more than one major item ahead at 20 minutes",
                 severity="critical",
                 metric_value=f"{delta_20:+d}g deficit at 20:00",
                 threshold=f"> {config.NW_DEFICIT_AT_20}g deficit is generally unrecoverable",
             ))
+
+        # T1: Team had NW lead at 20 but lost
+        if (
+            metrics.result == "loss"
+            and metrics.team_net_worth_at_20 > 0
+            and metrics.enemy_team_net_worth_at_20 > 0
+        ):
+            team_delta_20 = metrics.team_net_worth_at_20 - metrics.enemy_team_net_worth_at_20
+            if team_delta_20 >= 5000:
+                errors.append(DetectedError(
+                    category="Wasted team lead",
+                    description=f"Your team had a {team_delta_20:,}g team net worth lead at 20 min but lost",
+                    severity="high",
+                    metric_value=f"Team NW: {metrics.team_net_worth_at_20:,}g vs {metrics.enemy_team_net_worth_at_20:,}g",
+                    threshold="≥5000g team lead that wasn't converted",
+                ))
 
         # Rule 7: Passive laning
         if metrics.laning_heatmap_own_half_pct > config.PASSIVE_LANING_OWN_HALF_PCT:

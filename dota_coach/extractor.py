@@ -284,14 +284,15 @@ def extract_metrics(
     our_npc_name = _npc_name_from_unit(our_unit)
     our_hero_name = our_unit.replace("CDOTA_Unit_Hero_", "")
 
-    # Identify enemy carry parser slot: opposing team, smallest slot number (proxy for pos 1)
+    # Identify same-role opponent: opposing team, same lane_role as our player
     # Uses OpenDota lane_role from match_meta for accuracy
+    our_lane_role = our_meta.get("lane_role", 1)
     enemy_meta = next(
         (
             p for p in match_meta["players"]
             if p.get("account_id") != our_account_id
             and p.get("isRadiant") != our_meta.get("isRadiant")
-            and p.get("lane_role") == 1
+            and p.get("lane_role") == our_lane_role
         ),
         None,
     )
@@ -325,6 +326,23 @@ def extract_metrics(
     net_worth_at_20 = iv_our_20["networth"] if iv_our_20 else 0
     enemy_nw_at_10 = iv_enemy_10["networth"] if iv_enemy_10 else 0
     enemy_nw_at_20 = iv_enemy_20["networth"] if iv_enemy_20 else 0
+
+    # Team NW at 20: sum networth across all 5 slots per team
+    def get_team_nw(team_slots: range, time: int) -> int:
+        total = 0
+        for slot in team_slots:
+            iv = get_interval(slot, time)
+            if iv:
+                total += iv.get("networth", 0)
+        return total
+
+    radiant_slots = range(0, 5)
+    dire_slots = range(5, 10)
+    our_team_slots = radiant_slots if our_team_radiant else dire_slots
+    enemy_team_slots = dire_slots if our_team_radiant else radiant_slots
+
+    team_nw_at_20 = get_team_nw(our_team_slots, 1200)
+    enemy_team_nw_at_20 = get_team_nw(enemy_team_slots, 1200)
 
     # --- Step 4: duration + GPM/XPM ---
     epilogue_rec = next((r for r in records if r.get("type") == "epilogue"), None)
@@ -520,9 +538,11 @@ def extract_metrics(
         deaths_before_10=len(deaths_before_10),
         death_timestamps_laning=death_timestamps_laning,
         net_worth_at_10=net_worth_at_10,
-        enemy_carry_net_worth_at_10=enemy_nw_at_10,
         net_worth_at_20=net_worth_at_20,
-        enemy_carry_net_worth_at_20=enemy_nw_at_20,
+        opponent_net_worth_at_10=enemy_nw_at_10,
+        opponent_net_worth_at_20=enemy_nw_at_20,
+        team_net_worth_at_20=team_nw_at_20,
+        enemy_team_net_worth_at_20=enemy_team_nw_at_20,
         gpm=gpm,
         xpm=xpm,
         total_last_hits=total_last_hits,
@@ -588,14 +608,15 @@ def extract_metrics_from_opendota(
     net_worth_at_10 = gold_t[10] if len(gold_t) > 10 else 0
     lh_at_10 = lh_t[10] if len(lh_t) > 10 else 0
 
-    # Enemy carry net worth: find opposing pos 1
+    # Same-role opponent net worth: find opposing player with matching lane_role
     our_is_radiant = our_meta.get("isRadiant", True)
+    our_lane_role = our_meta.get("lane_role", 1)
     enemy_meta = next(
         (
             p for p in match_meta["players"]
             if p.get("account_id") != our_account_id
             and p.get("isRadiant") != our_is_radiant
-            and p.get("lane_role") == 1
+            and p.get("lane_role") == our_lane_role
         ),
         None,
     )
@@ -603,6 +624,22 @@ def extract_metrics_from_opendota(
     enemy_nw_at_10 = enemy_gold_t[10] if len(enemy_gold_t) > 10 else 0
     net_worth_at_20 = gold_t[20] if len(gold_t) > 20 else 0
     enemy_nw_at_20 = enemy_gold_t[20] if len(enemy_gold_t) > 20 else 0
+
+    # Team NW from gold_t arrays
+    all_players = match_meta.get("players", [])
+    allies = [p for p in all_players if p.get("isRadiant") == our_is_radiant]
+    enemies = [p for p in all_players if p.get("isRadiant") != our_is_radiant]
+
+    def _team_nw_at(players: list, minute: int) -> int:
+        total = 0
+        for p in players:
+            gt = p.get("gold_t") or []
+            if len(gt) > minute:
+                total += gt[minute]
+        return total
+
+    team_nw_at_20 = _team_nw_at(allies, 20)
+    enemy_team_nw_at_20 = _team_nw_at(enemies, 20)
 
     result = "win" if our_meta.get("win") else "loss"
     denies_at_10 = 0  # not available per-minute from match_meta
@@ -617,9 +654,11 @@ def extract_metrics_from_opendota(
         deaths_before_10=0,          # unavailable in degraded mode
         death_timestamps_laning=[],  # unavailable in degraded mode
         net_worth_at_10=net_worth_at_10,
-        enemy_carry_net_worth_at_10=enemy_nw_at_10,
         net_worth_at_20=net_worth_at_20,
-        enemy_carry_net_worth_at_20=enemy_nw_at_20,
+        opponent_net_worth_at_10=enemy_nw_at_10,
+        opponent_net_worth_at_20=enemy_nw_at_20,
+        team_net_worth_at_20=team_nw_at_20,
+        enemy_team_net_worth_at_20=enemy_team_nw_at_20,
         gpm=gpm,
         xpm=xpm,
         total_last_hits=total_last_hits,
