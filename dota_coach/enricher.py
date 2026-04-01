@@ -11,6 +11,7 @@ import httpx
 
 from dota_coach.models import EnrichmentContext, HeroBenchmark
 from dota_coach.opendota import get_benchmarks
+from dota_coach.stratz import fetch_hero_ally_synergies
 
 CACHE_DIR = Path.home() / ".dota_coach" / "cache"
 BENCHMARKS_TTL = 3600 * 6       # 6 hours
@@ -280,8 +281,6 @@ async def enrich_lane_synergy(
         bracket: STRATZ RankBracketBasicEnum value (e.g. "LEGEND_ANCIENT").
         heroes_data: Heroes data dict from dotaconstants heroes.json.
     """
-    from dota_coach.stratz import fetch_hero_ally_synergies
-
     hero_id = _find_hero_id(metrics.hero, heroes_data)
     if hero_id is None:
         return
@@ -297,8 +296,7 @@ async def enrich_lane_synergy(
     wr_by_id, syn_by_id = await fetch_hero_ally_synergies(hero_id, ally_ids, bracket)
 
     id_to_name = {
-        _find_hero_id(n, heroes_data): n
-        for n in metrics.lane_allies
+        hid: n for n in metrics.lane_allies if (hid := _find_hero_id(n, heroes_data)) is not None
     }
     metrics.lane_ally_synergies = {
         id_to_name[hid]: wr
