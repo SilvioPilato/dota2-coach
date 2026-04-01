@@ -13,7 +13,7 @@ from dota_coach.detector import detect_errors
 # ---------------------------------------------------------------------------
 
 def _raw_entry(item_id: int, match_count: int, win_count: int, avg_time_sec: int) -> dict:
-    return {"itemId": item_id, "matchCount": match_count, "winCount": win_count, "avgTime": avg_time_sec}
+    return {"itemId": item_id, "matchCount": match_count, "winCount": win_count, "timeAverage": avg_time_sec}
 
 
 def _items_data_with(*items: tuple[str, int]) -> dict:
@@ -191,3 +191,23 @@ def test_empty_bootstrap_uses_universal_fallback():
     errors = detect_errors(metrics, enrichment=enrichment)
     slow_errors = [e for e in errors if e.category == "Slow core item"]
     assert len(slow_errors) == 1
+
+
+def test_timeAverage_field_used_not_avgTime():
+    """Regression: Stratz API renamed avgTime -> timeAverage (patch 7.39).
+    _resolve_bootstrap_entries must read timeAverage; avgTime must be ignored."""
+    # Entry using new timeAverage field (20 min)
+    raw = [{"itemId": 11, "matchCount": 100, "winCount": 55, "timeAverage": 1200}]
+    items = _items_data_with(("bfury", 11))
+    result = _resolve_bootstrap_entries(raw, items)
+    assert len(result) == 1
+    assert result[0].avg_time_minutes == pytest.approx(20.0)
+
+
+def test_old_avgTime_field_produces_zero_not_crash():
+    """If an entry still uses the old avgTime key, avg_time_minutes should be 0 (not crash)."""
+    raw = [{"itemId": 11, "matchCount": 100, "winCount": 55, "avgTime": 1200}]
+    items = _items_data_with(("bfury", 11))
+    result = _resolve_bootstrap_entries(raw, items)
+    assert len(result) == 1
+    assert result[0].avg_time_minutes == pytest.approx(0.0)

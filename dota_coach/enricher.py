@@ -129,7 +129,7 @@ def _resolve_bootstrap_entries(raw: list, items_data: dict) -> list:
 
     - Builds a reverse map: numeric item_id → dotaconstants short name
     - Filters to match_frequency > 0.15
-    - Converts avgTime (seconds) → avg_time_minutes
+    - Converts timeAverage (seconds) → avg_time_minutes
     - Returns [] if raw is empty or total_matches is 0
     """
     from dota_coach.models import ItemBootstrapEntry
@@ -155,7 +155,7 @@ def _resolve_bootstrap_entries(raw: list, items_data: dict) -> list:
         item_id = entry.get("itemId")
         match_count = entry.get("matchCount") or 0
         win_count = entry.get("winCount") or 0
-        avg_time = entry.get("avgTime") or 0
+        avg_time = entry.get("timeAverage") or 0
 
         if not item_id or match_count == 0:
             continue

@@ -237,7 +237,7 @@ class TestEnrich:
         monkeypatch.setattr("dota_coach.enricher.CACHE_DIR", tmp_path)
 
         FAKE_BOOTSTRAP_RAW = [
-            {"itemId": 11, "matchCount": 400, "winCount": 220, "avgTime": 1020},
+            {"itemId": 11, "matchCount": 400, "winCount": 220, "timeAverage": 1020},
         ]
 
         async def mock_fetch(url):

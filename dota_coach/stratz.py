@@ -78,7 +78,7 @@ query HeroItemBootstrap($heroId: Short!, $bracket: RankBracketBasicEnum!) {
       itemId
       winCount
       matchCount
-      avgTime
+      timeAverage
     }
   }
 }
@@ -194,7 +194,7 @@ async def get_hero_bracket_benchmarks(
 async def get_hero_item_bootstrap(hero_id: int, bracket: str) -> list[dict]:
     """Fetch item bootstrap data from STRATZ for a given hero + bracket.
 
-    Returns a list of dicts with keys itemId, winCount, matchCount, avgTime.
+    Returns a list of dicts with keys itemId, winCount, matchCount, timeAverage.
     Returns [] on any error or if STRATZ_API_KEY is not set.
 
     Args:
