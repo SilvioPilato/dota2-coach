@@ -113,12 +113,24 @@ def build_system_prompt(role: int = 1, turbo: bool = False) -> str:
 
 
 def _lane_line(metrics) -> "str | None":
-    """Build the 'Lane: Hero + ally vs enemy (WR%)' line. Returns None if no lane_enemies."""
+    """Build the 'Lane: Hero + ally (synergy X) vs enemy (WR%)' line. Returns None if no lane_enemies."""
     if not metrics.lane_enemies:
         return None
 
-    allies_str = " + ".join(metrics.lane_allies) if metrics.lane_allies else ""
-    our_side = f"{metrics.hero} + {allies_str}" if allies_str else metrics.hero
+    synergy_map = getattr(metrics, "lane_ally_synergy_scores", {})
+
+    # Build ally strings with per-ally synergy score when available
+    if metrics.lane_allies:
+        ally_parts = []
+        for ally in metrics.lane_allies:
+            score = synergy_map.get(ally)
+            if score is not None:
+                ally_parts.append(f"{ally} (synergy {score:+.1f})")
+            else:
+                ally_parts.append(ally)
+        our_side = f"{metrics.hero} + {' + '.join(ally_parts)}"
+    else:
+        our_side = metrics.hero
 
     # Build enemy strings with WR when available
     wr_map = getattr(metrics, "lane_matchup_winrates", {})
@@ -131,13 +143,23 @@ def _lane_line(metrics) -> "str | None":
             enemy_parts.append(enemy)
     enemies_str = " + ".join(enemy_parts)
 
-    # Check if unfavorable (avg WR < 47%)
-    wrs = [wr_map[e] for e in metrics.lane_enemies if e in wr_map]
-    unfavorable = wrs and (sum(wrs) / len(wrs)) < 0.47
-
     line = f"- Lane: {our_side} vs {enemies_str}"
-    if unfavorable:
-        line += " \u2014 unfavorable lane"
+
+    # Add synergy context label based on average synergy score across allies
+    if synergy_map and metrics.lane_allies:
+        scores = [synergy_map[ally] for ally in metrics.lane_allies if ally in synergy_map]
+        if scores:
+            avg_synergy = sum(scores) / len(scores)
+            if avg_synergy > 5:
+                line += " \u2014 good lane synergy"
+            elif avg_synergy < -3:
+                line += " \u2014 weak synergy"
+    else:
+        # Fallback: flag unfavorable lane from WR data when no synergy data
+        wrs = [wr_map[e] for e in metrics.lane_enemies if e in wr_map]
+        if wrs and (sum(wrs) / len(wrs)) < 0.47:
+            line += " \u2014 unfavorable lane"
+
     return line
 
 

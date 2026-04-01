@@ -499,3 +499,113 @@ def test_lane_line_wr_in_chat_system_prompt():
     content = _build_chat_system_prompt(report)
     assert "Axe (48.2% WR)" in content
     assert "Pudge (53.1% WR)" in content
+
+
+# ---------------------------------------------------------------------------
+# Lane ally synergy score formatting
+# ---------------------------------------------------------------------------
+
+def test_lane_line_synergy_score_shown_for_ally():
+    """Ally with synergy score shows '(synergy +8.3)' annotation."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe"],
+        lane_allies=["Lion"],
+        lane_ally_synergy_scores={"Lion": 8.3},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "Lion (synergy +8.3)" in result
+
+
+def test_lane_line_negative_synergy_score_shown_for_ally():
+    """Ally with negative synergy score shows '(synergy -3.1)' annotation."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe"],
+        lane_allies=["Techies"],
+        lane_ally_synergy_scores={"Techies": -3.1},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "Techies (synergy -3.1)" in result
+
+
+def test_lane_line_synergy_omitted_when_no_synergy_map():
+    """No synergy scores → ally shown as plain name, no synergy annotation."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe", "Pudge"],
+        lane_allies=["Lion"],
+        lane_ally_synergy_scores={},
+    )
+    result = _lane_line(m)
+    assert result == "- Lane: Juggernaut + Lion vs Axe + Pudge"
+
+
+def test_lane_line_good_synergy_label_when_score_above_5():
+    """avg ally synergy > 5 appends ' — good lane synergy'."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe"],
+        lane_allies=["Lion"],
+        lane_ally_synergy_scores={"Lion": 7.0},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "\u2014 good lane synergy" in result
+
+
+def test_lane_line_weak_synergy_label_when_score_below_neg3():
+    """avg ally synergy < -3 appends ' — weak synergy'."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe"],
+        lane_allies=["Techies"],
+        lane_ally_synergy_scores={"Techies": -5.0},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "\u2014 weak synergy" in result
+
+
+def test_lane_line_no_context_label_for_neutral_synergy():
+    """Synergy score between -3 and 5 adds no context label."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe"],
+        lane_allies=["Lion"],
+        lane_ally_synergy_scores={"Lion": 2.5},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "synergy" in result  # score annotation present
+    assert "good lane synergy" not in result
+    assert "weak synergy" not in result
+
+
+def test_lane_line_synergy_overrides_unfavorable_label():
+    """When synergy data is present, unfavorable-lane WR check is skipped."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe", "Pudge"],
+        lane_allies=["Lion"],
+        lane_matchup_winrates={"Axe": 0.40, "Pudge": 0.42},
+        lane_ally_synergy_scores={"Lion": 2.5},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "unfavorable" not in result
+
+
+def test_lane_line_full_format_with_synergy_and_wr():
+    """Full format: ally with synergy score + enemies with WR."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe", "Pudge"],
+        lane_allies=["Lion"],
+        lane_matchup_winrates={"Axe": 0.482, "Pudge": 0.531},
+        lane_ally_synergy_scores={"Lion": 8.3},
+    )
+    result = _lane_line(m)
+    assert result == "- Lane: Juggernaut + Lion (synergy +8.3) vs Axe (48.2% WR) + Pudge (53.1% WR) \u2014 good lane synergy"
