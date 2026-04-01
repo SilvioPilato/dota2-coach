@@ -112,6 +112,17 @@ def build_system_prompt(role: int = 1, turbo: bool = False) -> str:
     )
 
 
+def _lane_line(metrics) -> "str | None":
+    """Build the 'Lane: Hero + ally vs enemy' line. Returns None if no lane_enemies."""
+    if not metrics.lane_enemies:
+        return None
+
+    allies_str = " + ".join(metrics.lane_allies) if metrics.lane_allies else ""
+    our_side = f"{metrics.hero} + {allies_str}" if allies_str else metrics.hero
+    enemies_str = " + ".join(metrics.lane_enemies)
+    return f"- Lane: {our_side} vs {enemies_str}"
+
+
 def _benchmark_line(benchmarks: list[HeroBenchmark], metric: str, label: str, value: float) -> str:
     """Format a metric line with percentile info if benchmark available."""
     bench = next((b for b in benchmarks if b.metric == metric), None)
@@ -142,6 +153,9 @@ def build_user_message(
 
     # --- Role-specific PERFORMANCE block ---
     lines.append("PERFORMANCE (percentiles are global, all brackets, this hero):")
+    lane = _lane_line(metrics)
+    if lane:
+        lines.append(lane)
 
     if role in (1, 2):
         # Pos 1/2: GPM, LH, first core, NW deltas
@@ -280,6 +294,9 @@ def _build_chat_system_prompt(ctx: "MatchReport") -> str:
     lines.append("MATCH METRICS:")
     lines.append(f"Hero: {m.hero} | Role: pos {ctx.role} ({role_label}) | Result: {m.result.upper()} | Duration: {m.duration_minutes:.0f} min")
     lines.append(f"GPM: {m.gpm} | XPM: {m.xpm} | LH@10: {m.lh_at_10} | Denies@10: {m.denies_at_10}")
+    lane = _lane_line(m)
+    if lane:
+        lines.append(lane)
     if m.death_events:
         lines.append(f"Deaths before 10: {m.deaths_before_10}")
         for de in m.death_events:
