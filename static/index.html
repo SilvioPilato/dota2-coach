@@ -686,40 +686,6 @@ async function sendChat() {
   document.getElementById('chatInput').focus();
 }
 
-async function loadSidebar(accountId) {
-  if (!accountId) return;
-
-  // Show loading state
-  const list = document.getElementById('sidebarList');
-  const emptyEl = document.getElementById('sidebarEmpty');
-  const errorEl = document.getElementById('sidebarError');
-  emptyEl.style.display = 'none';
-  errorEl.style.display = 'none';
-
-  // Remove old rows (keep the empty/error placeholders)
-  Array.from(list.children).forEach(c => {
-    if (!c.id || (c.id !== 'sidebarEmpty' && c.id !== 'sidebarError')) c.remove();
-  });
-
-  // Insert loading indicator
-  const loadingEl = document.createElement('div');
-  loadingEl.className = 'sidebar-loading';
-  loadingEl.id = 'sidebarLoading';
-  loadingEl.textContent = 'Loading matches…';
-  list.insertBefore(loadingEl, emptyEl);
-
-  try {
-    const res = await fetch(`/recent-matches/${accountId}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const matches = await res.json();
-    loadingEl.remove();
-    renderSidebar(matches);
-  } catch (e) {
-    loadingEl.remove();
-    showSidebarError();
-  }
-}
-
 function loadSavedAccount() {
   const saved = localStorage.getItem('dota_coach_account_id');
   if (saved) {
@@ -774,122 +740,175 @@ function gameTypeLabel(lobbyType, gameMode) {
 /* ------------------------------------------------------------------ */
 /*  Sidebar                                                            */
 /* ------------------------------------------------------------------ */
-function renderSidebar(matches) {
-  const list = document.getElementById('sidebarList');
+function buildMatchRow(m) {
+  const expired  = !m.replay_available;
+  const analyzed = m.analyzed;
+
+  const stateClass = expired ? 'state-expired' : (analyzed ? 'state-analyzed' : 'state-ready');
+
+  const initials = m.hero_name
+    ? m.hero_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+    : '??';
+
+  const date     = new Date(m.start_time * 1000).toLocaleDateString();
+  const mins     = Math.floor(m.duration_seconds / 60);
+  const secs     = m.duration_seconds % 60;
+  const duration = `${mins}:${secs.toString().padStart(2, '0')}`;
+  const gt       = gameTypeLabel(m.lobby_type ?? 0, m.game_mode ?? 0);
+  const metaLine = `${date} · ${duration}${gt ? ' · ' + gt : ''}`;
+
+  const row = document.createElement('div');
+  row.className = `sidebar-row ${stateClass}${expired ? ' sidebar-expired' : ''}`;
+  row.dataset.matchId       = m.match_id;
+  row.dataset.heroName      = m.hero_name;
+  row.dataset.analyzed      = m.analyzed;
+  row.dataset.replayAvailable = m.replay_available;
+
+  row.innerHTML = `
+    <div class="sidebar-avatar">${initials}</div>
+    <div class="sidebar-info">
+      <div class="sidebar-hero">${m.hero_name || 'Unknown'}</div>
+      <div class="sidebar-meta">${metaLine}</div>
+    </div>
+    <div class="sidebar-badge-wrap">
+      <span class="sidebar-badge ${m.won ? 'badge-win' : 'badge-loss'}">${m.won ? 'W' : 'L'}</span>
+      ${!expired ? `<button class="sidebar-action" style="display:none">${analyzed ? 'Re-analyze' : 'Analyze'}</button>` : ''}
+    </div>
+    <span class="sidebar-dot"></span>
+  `;
+
+  // Hover behavior
+  if (!expired) {
+    const badge = row.querySelector('.sidebar-badge');
+    const btn   = row.querySelector('.sidebar-action');
+    row.addEventListener('mouseenter', () => { badge.style.display = 'none'; btn.style.display = ''; });
+    row.addEventListener('mouseleave', () => { badge.style.display = '';    btn.style.display = 'none'; });
+  }
+
+  // Click to view cached report
+  if (analyzed && !expired) {
+    row.addEventListener('click', async function(e) {
+      if (e.target.classList.contains('sidebar-action')) return;
+      const pid      = localStorage.getItem('dota_coach_account_id') || lastPlayerId || '';
+      const cacheKey = `dota_analysis_${m.match_id}_${pid}`;
+      const cached   = localStorage.getItem(cacheKey);
+      if (cached) { try { renderReport(JSON.parse(cached)); return; } catch {} }
+      try {
+        const res = await fetch(`/report/${pid}/${m.match_id}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const report = await res.json();
+        localStorage.setItem(cacheKey, JSON.stringify(report));
+        renderReport(report);
+      } catch (err) { console.error('Failed to load report from server:', err); }
+    });
+  }
+
+  // Analyze button
+  if (!expired) {
+    const btn = row.querySelector('.sidebar-action');
+    if (btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        document.getElementById('matchId').value = m.match_id;
+        if (analyzed) { runAnalysis(null, { force_reanalyze: true }); }
+        else           { runAnalysis(); }
+      });
+    }
+  }
+
+  return row;
+}
+
+async function loadSidebar(accountId) {
+  // Tear down any previous observer to prevent stale account triggering loads
+  if (sidebarObserver) { sidebarObserver.disconnect(); sidebarObserver = null; }
+
+  // Reset pagination state
+  sidebarOffset    = 0;
+  sidebarLoading   = false;
+  sidebarDone      = false;
+  sidebarAccountId = accountId;
+
+  const list    = document.getElementById('sidebarList');
   const emptyEl = document.getElementById('sidebarEmpty');
   const errorEl = document.getElementById('sidebarError');
 
-  // Clear existing rows (keep empty/error placeholders)
+  // Clear existing rows, keep placeholder divs
   Array.from(list.children).forEach(c => {
     if (!c.id || (c.id !== 'sidebarEmpty' && c.id !== 'sidebarError')) c.remove();
   });
-
-  if (!matches || matches.length === 0) {
-    emptyEl.style.display = '';
-    return;
-  }
   emptyEl.style.display = 'none';
   errorEl.style.display = 'none';
 
-  matches.forEach(m => {
-    const expired = !m.replay_available;
-    const analyzed = m.analyzed;
+  // Insert sentinel at the bottom
+  const sentinel = document.createElement('div');
+  sentinel.id = 'sidebarSentinel';
+  sentinel.style.cssText = 'height:1px;display:flex;align-items:center;justify-content:center;padding:8px 0;';
+  list.appendChild(sentinel);
 
-    // State class
-    let stateClass = expired ? 'state-expired' : (analyzed ? 'state-analyzed' : 'state-ready');
+  // Observe sentinel to trigger next-page loads
+  sidebarObserver = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) loadSidebarPage(sidebarAccountId);
+  }, { threshold: 0.1 });
+  sidebarObserver.observe(sentinel);
 
-    // Hero initials
-    const initials = m.hero_name
-      ? m.hero_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-      : '??';
-
-    // Date
-    const date = new Date(m.start_time * 1000).toLocaleDateString();
-
-    // Duration
-    const mins = Math.floor(m.duration_seconds / 60);
-    const secs = m.duration_seconds % 60;
-    const duration = `${mins}:${secs.toString().padStart(2, '0')}`;
-
-    const row = document.createElement('div');
-    row.className = `sidebar-row ${stateClass}${expired ? ' sidebar-expired' : ''}`;
-    row.dataset.matchId = m.match_id;
-    row.dataset.heroName = m.hero_name;
-    row.dataset.analyzed = m.analyzed;
-    row.dataset.replayAvailable = m.replay_available;
-
-    row.innerHTML = `
-      <div class="sidebar-avatar">${initials}</div>
-      <div class="sidebar-info">
-        <div class="sidebar-hero">${m.hero_name || 'Unknown'}</div>
-        <div class="sidebar-meta">${date} · ${duration}${(() => { const gt = gameTypeLabel(m.lobby_type ?? 0, m.game_mode ?? 0); return gt ? ' · ' + gt : ''; })()}</div>
-      </div>
-      <div class="sidebar-badge-wrap">
-        <span class="sidebar-badge ${m.won ? 'badge-win' : 'badge-loss'}">${m.won ? 'W' : 'L'}</span>
-        ${!expired ? `<button class="sidebar-action" style="display:none">${analyzed ? 'Re-analyze' : 'Analyze'}</button>` : ''}
-      </div>
-      <span class="sidebar-dot"></span>
-    `;
-
-    // Hover behavior (show action button, hide badge)
-    if (!expired) {
-      const badge = row.querySelector('.sidebar-badge');
-      const btn = row.querySelector('.sidebar-action');
-      row.addEventListener('mouseenter', () => {
-        badge.style.display = 'none';
-        btn.style.display = '';
-      });
-      row.addEventListener('mouseleave', () => {
-        badge.style.display = '';
-        btn.style.display = 'none';
-      });
-    }
-
-    if (analyzed && !expired) {
-      row.addEventListener('click', async function(e) {
-        // Don't trigger if clicking the action button
-        if (e.target.classList.contains('sidebar-action')) return;
-        const pid = localStorage.getItem('dota_coach_account_id') || lastPlayerId || '';
-        const cacheKey = `dota_analysis_${m.match_id}_${pid}`;
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-          try { renderReport(JSON.parse(cached)); return; } catch {}
-        }
-        // Cache miss — fetch from server
-        try {
-          const res = await fetch(`/report/${pid}/${m.match_id}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const report = await res.json();
-          localStorage.setItem(cacheKey, JSON.stringify(report));
-          renderReport(report);
-        } catch (err) {
-          console.error('Failed to load report from server:', err);
-        }
-      });
-    }
-
-    if (!expired) {
-      const btn = row.querySelector('.sidebar-action');
-      if (btn) {
-        btn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          document.getElementById('matchId').value = m.match_id;
-          if (analyzed) {
-            runAnalysis(null, { force_reanalyze: true });
-          } else {
-            runAnalysis();
-          }
-        });
-      }
-    }
-
-    list.appendChild(row);
-  });
+  // Load first page immediately
+  await loadSidebarPage(accountId);
 }
 
-function showSidebarError() {
-  document.getElementById('sidebarError').style.display = '';
-  document.getElementById('sidebarEmpty').style.display = 'none';
+async function loadSidebarPage(accountId) {
+  if (sidebarLoading || sidebarDone || accountId !== sidebarAccountId) return;
+
+  sidebarLoading = true;
+  const list     = document.getElementById('sidebarList');
+  const emptyEl  = document.getElementById('sidebarEmpty');
+  const sentinel = document.getElementById('sidebarSentinel');
+
+  if (sentinel) sentinel.innerHTML = '<span style="font-size:12px;color:var(--text-muted)">Loading\u2026</span>';
+
+  try {
+    const res = await fetch(`/recent-matches/${accountId}?offset=${sidebarOffset}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const matches = await res.json();
+
+    if (matches.length === 0 && sidebarOffset === 0) {
+      // No matches at all
+      emptyEl.style.display = '';
+      sidebarDone = true;
+      if (sidebarObserver) { sidebarObserver.disconnect(); sidebarObserver = null; }
+      if (sentinel) sentinel.remove();
+      return;
+    }
+
+    // Append rows before sentinel
+    matches.forEach(m => {
+      const row = buildMatchRow(m);
+      if (sentinel) list.insertBefore(row, sentinel);
+      else          list.appendChild(row);
+    });
+
+    if (matches.length < 20) {
+      // Last page — no more data
+      sidebarDone = true;
+      if (sidebarObserver) { sidebarObserver.disconnect(); sidebarObserver = null; }
+      if (sentinel) sentinel.remove();
+    } else {
+      sidebarOffset += 20;
+      if (sentinel) sentinel.innerHTML = '';
+    }
+  } catch (e) {
+    if (sentinel) {
+      sentinel.innerHTML = `
+        <span style="font-size:12px;color:var(--text-muted)">Failed to load.
+          <button onclick="loadSidebarPage('${accountId}')"
+                  style="margin-left:4px;background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;">
+            Retry
+          </button>
+        </span>`;
+    }
+  } finally {
+    sidebarLoading = false;
+  }
 }
 </script>
 
