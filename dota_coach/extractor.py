@@ -11,6 +11,41 @@ from dota_coach.models import DeathCause, DeathEvent, MatchMetrics
 # Imported here to avoid circular import; detector defines CORE_ITEMS
 # We do a lazy import inside the function so extractor can be imported independently.
 
+# Hero ID → localized name table (kept in sync with api.py _HERO_NAMES).
+# Used when OpenDota returns hero=null in match_meta (as of early 2026).
+_HERO_ID_TO_NAME: dict[int, str] = {
+    1: "Anti-Mage", 2: "Axe", 3: "Bane", 4: "Bloodseeker", 5: "Crystal Maiden",
+    6: "Drow Ranger", 7: "Earthshaker", 8: "Juggernaut", 9: "Mirana", 10: "Morphling",
+    11: "Shadow Fiend", 12: "Phantom Lancer", 13: "Puck", 14: "Pudge", 15: "Razor",
+    16: "Sand King", 17: "Storm Spirit", 18: "Sven", 19: "Tiny", 20: "Vengeful Spirit",
+    21: "Windranger", 22: "Zeus", 23: "Kunkka", 25: "Lina", 26: "Lion",
+    27: "Shadow Shaman", 28: "Slardar", 29: "Tidehunter", 30: "Witch Doctor", 31: "Lich",
+    32: "Riki", 33: "Enigma", 34: "Tinker", 35: "Sniper", 36: "Necrophos",
+    37: "Warlock", 38: "Beastmaster", 39: "Queen of Pain", 40: "Venomancer",
+    41: "Faceless Void", 42: "Wraith King", 43: "Death Prophet", 44: "Phantom Assassin",
+    45: "Pugna", 46: "Templar Assassin", 47: "Viper", 48: "Luna", 49: "Dragon Knight",
+    50: "Dazzle", 51: "Clockwerk", 52: "Leshrac", 53: "Nature's Prophet",
+    54: "Lifestealer", 55: "Dark Seer", 56: "Clinkz", 57: "Omniknight",
+    58: "Enchantress", 59: "Huskar", 60: "Night Stalker", 61: "Broodmother",
+    62: "Bounty Hunter", 63: "Weaver", 64: "Jakiro", 65: "Batrider", 66: "Chen",
+    67: "Spectre", 68: "Ancient Apparition", 69: "Doom", 70: "Ursa",
+    71: "Spirit Breaker", 72: "Gyrocopter", 73: "Alchemist", 74: "Invoker",
+    75: "Silencer", 76: "Outworld Devourer", 77: "Lycan", 78: "Brewmaster",
+    79: "Shadow Demon", 80: "Lone Druid", 81: "Chaos Knight", 82: "Meepo",
+    83: "Treant Protector", 84: "Ogre Magi", 85: "Undying", 86: "Rubick",
+    87: "Disruptor", 88: "Nyx Assassin", 89: "Naga Siren", 90: "Keeper of the Light",
+    91: "Io", 92: "Visage", 93: "Slark", 94: "Medusa", 95: "Troll Warlord",
+    96: "Centaur Warrunner", 97: "Magnus", 98: "Timbersaw", 99: "Bristleback",
+    100: "Tusk", 101: "Skywrath Mage", 102: "Abaddon", 103: "Elder Titan",
+    104: "Legion Commander", 105: "Techies", 106: "Ember Spirit", 107: "Earth Spirit",
+    108: "Underlord", 109: "Terrorblade", 110: "Phoenix", 111: "Oracle",
+    112: "Winter Wyvern", 113: "Arc Warden", 114: "Monkey King",
+    119: "Dark Willow", 120: "Pangolier", 121: "Grimstroke", 123: "Hoodwink",
+    126: "Void Spirit", 128: "Snapfire", 129: "Mars", 131: "Ring Master",
+    135: "Dawnbreaker", 136: "Marci", 137: "Primal Beast", 138: "Muerta",
+    145: "Kez", 155: "Largo",
+}
+
 WARD_ITEMS = {"item_ward_dispenser", "item_ward_sentry"}
 
 # Radius (in 0-256 normalised coordinate space) within which a death near an
@@ -588,12 +623,15 @@ def extract_metrics_from_opendota(
     if our_meta is None:
         raise ValueError(f"account_id {our_account_id} not found in match players")
 
-    our_unit = our_meta.get("hero_id", "Unknown")
-    our_hero_name = our_meta.get("hero", {}).get("localized_name", "") or our_meta.get("hero_id", "Unknown")
-    # OpenDota players[] include personaname, hero info may be nested; use a robust fallback
-    # Try common field shapes from OpenDota API
-    if not our_hero_name or our_hero_name == "Unknown":
-        our_hero_name = str(our_unit)
+    our_unit = our_meta.get("hero_id")
+    # Resolve hero name: try nested hero.localized_name, then static id map, then str(id)
+    our_hero_name: str = (
+        (our_meta.get("hero") or {}).get("localized_name", "")
+        or _HERO_ID_TO_NAME.get(int(our_unit), "") if our_unit is not None else ""
+        or str(our_unit or "Unknown")
+    )
+    if not our_hero_name:
+        our_hero_name = str(our_unit or "Unknown")
 
     duration_seconds = match_meta.get("duration", 0)
     duration_minutes = duration_seconds / 60.0
@@ -650,7 +688,13 @@ def extract_metrics_from_opendota(
     enemy_lane = OPPOSING_LANE.get(our_lane) if our_lane else None
 
     def _hero_name(p: dict) -> str:
-        return (p.get("hero") or {}).get("localized_name", "") or str(p.get("hero_id", "Unknown"))
+        localized = (p.get("hero") or {}).get("localized_name", "")
+        if localized:
+            return localized
+        hero_id = p.get("hero_id")
+        if hero_id is not None:
+            return _HERO_ID_TO_NAME.get(int(hero_id), str(hero_id))
+        return "Unknown"
 
     if our_lane and enemy_lane:
         lane_allies = [

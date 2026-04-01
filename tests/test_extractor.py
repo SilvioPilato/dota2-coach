@@ -328,7 +328,7 @@ def test_lane_matchup_jungle_lane_returns_empty():
 
 
 def test_lane_matchup_hero_id_fallback():
-    """When hero localized_name is absent, fall back to hero_id string."""
+    """When hero localized_name is absent, resolve via _HERO_ID_TO_NAME static map."""
     our_id = 100
     our = _make_player(our_id, True, lane=1, hero_name="Drow Ranger")
     enemy_no_name = {
@@ -342,4 +342,5 @@ def test_lane_matchup_hero_id_fallback():
     match = _make_opendota_match(our, [enemy_no_name])
     m = extract_metrics_from_opendota(our_id, match)
 
-    assert m.lane_enemies == ["42"]
+    # hero_id 42 = Wraith King — should be resolved to the localized name, not "42"
+    assert m.lane_enemies == ["Wraith King"]
