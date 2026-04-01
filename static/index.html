@@ -160,7 +160,7 @@ const ROLE_CARDS = {
     { label: 'GPM',          key: m => m.gpm },
     { label: 'LH @ 10',      key: m => m.lh_at_10 },
     { label: 'First Core',   key: m => m.first_core_item_minute != null ? m.first_core_item_minute.toFixed(1) + ' min' : '—' },
-    { label: 'NW Δ @ 10',    key: m => (m.net_worth_at_10 - m.enemy_carry_net_worth_at_10) },
+    { label: 'NW Δ @ 10',    key: m => (m.net_worth_at_10 - m.opponent_net_worth_at_10) },
   ],
   2: [
     { label: 'GPM',          key: m => m.gpm },
