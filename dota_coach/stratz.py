@@ -48,7 +48,7 @@ query HeroBracketBenchmarks($heroIds: [Short], $bracketIds: [RankBracketBasicEnu
 _ITEM_BOOTSTRAP_QUERY = """
 query HeroItemBootstrap($heroId: Short!, $bracket: RankBracketBasicEnum!) {
   heroStats {
-    itemBootstrap(heroId: $heroId, bracketBasicIds: [$bracket]) {
+    itemBootPurchase(heroId: $heroId, bracketBasicIds: [$bracket]) {
       itemId
       winCount
       matchCount
@@ -200,7 +200,7 @@ async def get_hero_item_bootstrap(hero_id: int, bracket: str) -> list[dict]:
         return []
 
     try:
-        result = data["data"]["heroStats"]["itemBootstrap"]
+        result = data["data"]["heroStats"]["itemBootPurchase"]
     except (KeyError, TypeError) as exc:
         logger.warning("Unexpected STRATZ item bootstrap response shape for hero %s: %s", hero_id, exc)
         return []
