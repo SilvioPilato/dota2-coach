@@ -36,6 +36,17 @@ async def get_recent_matches(account_id: int, limit: int = 10) -> list[dict]:
         return response.json()
 
 
+async def get_paginated_matches(account_id: int, limit: int = 20, offset: int = 0) -> list[dict]:
+    """GET /players/{account_id}/matches — paginated match history with limit/offset."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"{BASE_URL}/players/{account_id}/matches",
+            params={"limit": limit, "offset": offset},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 def identify_enemy_carry(match: dict, our_account_id: int) -> dict | None:
     """
     Find the enemy safe-lane player (lane_role == 1) on the opposing team.
