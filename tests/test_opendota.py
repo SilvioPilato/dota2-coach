@@ -25,7 +25,7 @@ async def test_get_paginated_matches_default_params():
 
     mock_client.get.assert_called_once_with(
         "https://api.opendota.com/api/players/12345678/matches",
-        params={"limit": 20, "offset": 0},
+        params={"limit": 20, "offset": 0, "project": ["game_mode", "lobby_type"]},
     )
     assert result == [{"match_id": 1}, {"match_id": 2}]
 
@@ -47,7 +47,7 @@ async def test_get_paginated_matches_custom_offset():
 
     mock_client.get.assert_called_once_with(
         "https://api.opendota.com/api/players/12345678/matches",
-        params={"limit": 20, "offset": 40},
+        params={"limit": 20, "offset": 40, "project": ["game_mode", "lobby_type"]},
     )
     assert result == []
 
