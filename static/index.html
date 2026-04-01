@@ -145,6 +145,13 @@ let matchReport = null;   // Full MatchReport JSON from /analyze
 let chatHistory = [];     // Array of {role, content} turns
 window.currentQuote = null;
 
+// Sidebar pagination state
+let sidebarOffset = 0;
+let sidebarLoading = false;
+let sidebarDone = false;
+let sidebarObserver = null;
+let sidebarAccountId = null;
+
 /* ------------------------------------------------------------------ */
 /*  Role-adaptive metric card definitions                              */
 /* ------------------------------------------------------------------ */
@@ -746,6 +753,25 @@ initChatInput();
 loadSavedAccount();
 
 /* ------------------------------------------------------------------ */
+/*  Game type label                                                    */
+/* ------------------------------------------------------------------ */
+function gameTypeLabel(lobbyType, gameMode) {
+  // Turbo (game_mode 23) supersedes lobby type entirely
+  if (gameMode === 23) return 'Turbo';
+
+  const LOBBY = { 7: 'Ranked', 0: 'Unranked' };
+  const MODE  = { 2: 'CM', 5: 'Random', 8: 'All Random' };
+
+  const lobbyLabel = LOBBY[lobbyType] ?? '';
+  const modeLabel  = MODE[gameMode]   ?? '';
+
+  if (lobbyLabel && modeLabel) return `${lobbyLabel} · ${modeLabel}`;
+  if (lobbyLabel) return lobbyLabel;
+  if (modeLabel)  return modeLabel;
+  return '';
+}
+
+/* ------------------------------------------------------------------ */
 /*  Sidebar                                                            */
 /* ------------------------------------------------------------------ */
 function renderSidebar(matches) {
@@ -796,7 +822,7 @@ function renderSidebar(matches) {
       <div class="sidebar-avatar">${initials}</div>
       <div class="sidebar-info">
         <div class="sidebar-hero">${m.hero_name || 'Unknown'}</div>
-        <div class="sidebar-meta">${date} · ${duration}</div>
+        <div class="sidebar-meta">${date} · ${duration}${(() => { const gt = gameTypeLabel(m.lobby_type ?? 0, m.game_mode ?? 0); return gt ? ' · ' + gt : ''; })()}</div>
       </div>
       <div class="sidebar-badge-wrap">
         <span class="sidebar-badge ${m.won ? 'badge-win' : 'badge-loss'}">${m.won ? 'W' : 'L'}</span>
