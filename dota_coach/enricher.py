@@ -11,6 +11,7 @@ import httpx
 
 from dota_coach.models import EnrichmentContext, HeroBenchmark
 from dota_coach.opendota import get_benchmarks
+from dota_coach.stratz import fetch_hero_ally_synergies, fetch_hero_matchup_winrates
 
 CACHE_DIR = Path.home() / ".dota_coach" / "cache"
 BENCHMARKS_TTL = 3600 * 6       # 6 hours
@@ -262,6 +263,108 @@ def _median_from_benchmarks(benchmarks_result: list[dict]) -> float:
     # Find closest to 0.5
     closest = min(pts, key=lambda x: abs(x["percentile"] - 0.5))
     return closest["value"]
+
+
+async def enrich_lane_synergy(
+    metrics: Any,
+    bracket: str,
+    heroes_data: dict,
+) -> None:
+    """Fetch and attach Stratz lane ally synergy data to metrics (mutates in place).
+
+    Resolves ally hero names from metrics.lane_allies to hero IDs, queries
+    fetch_hero_ally_synergies, and stores results in metrics.lane_ally_synergies
+    and metrics.lane_ally_synergy_scores.
+
+    Args:
+        metrics: MatchMetrics instance to mutate.
+        bracket: STRATZ RankBracketBasicEnum value (e.g. "LEGEND_ANCIENT").
+        heroes_data: Heroes data dict from dotaconstants heroes.json.
+    """
+    hero_id = _find_hero_id(metrics.hero, heroes_data)
+    if hero_id is None:
+        return
+
+    ally_ids = [
+        id_
+        for name in metrics.lane_allies
+        if (id_ := _find_hero_id(name, heroes_data)) is not None
+    ]
+    if not ally_ids:
+        return
+
+    wr_by_id, syn_by_id = await fetch_hero_ally_synergies(hero_id, ally_ids, bracket)
+
+    id_to_name = {
+        hid: n for n in metrics.lane_allies if (hid := _find_hero_id(n, heroes_data)) is not None
+    }
+    metrics.lane_ally_synergies = {
+        id_to_name[hid]: wr
+        for hid, wr in wr_by_id.items()
+        if hid in id_to_name
+    }
+    metrics.lane_ally_synergy_scores = {
+        id_to_name[hid]: s
+        for hid, s in syn_by_id.items()
+        if hid in id_to_name
+    }
+
+
+async def enrich_lane_matchup(
+    metrics: Any,
+    bracket: str,
+    heroes_data: dict,
+) -> None:
+    """Fetch Stratz lane matchup (enemy WRs + ally synergy) and attach to metrics.
+
+    Resolves both enemy and ally hero names to hero IDs, calls
+    fetch_hero_matchup_winrates with the combined set so a single cache entry
+    covers both vs and with lookups, then stores results in
+    metrics.lane_matchup_winrates, metrics.lane_ally_synergies, and
+    metrics.lane_ally_synergy_scores.
+
+    Args:
+        metrics: MatchMetrics instance to mutate.
+        bracket: STRATZ RankBracketBasicEnum value (e.g. "LEGEND_ANCIENT").
+        heroes_data: Heroes data dict from dotaconstants heroes.json.
+    """
+    hero_id = _find_hero_id(metrics.hero, heroes_data)
+    if hero_id is None:
+        return
+
+    enemy_ids = [
+        hid for n in metrics.lane_enemies if (hid := _find_hero_id(n, heroes_data)) is not None
+    ]
+    ally_ids = [
+        hid for n in metrics.lane_allies if (hid := _find_hero_id(n, heroes_data)) is not None
+    ]
+    all_ids = enemy_ids + ally_ids
+
+    if not all_ids:
+        return
+
+    # Fetch with combined IDs to warm the cache for both vs and with lookups
+    wr_by_id = await fetch_hero_matchup_winrates(hero_id, all_ids, bracket)
+
+    if enemy_ids:
+        id_to_name = {
+            hid: n for n in metrics.lane_enemies if (hid := _find_hero_id(n, heroes_data)) is not None
+        }
+        metrics.lane_matchup_winrates = {
+            id_to_name[hid]: wr for hid, wr in wr_by_id.items() if hid in id_to_name
+        }
+
+    if ally_ids:
+        syn_by_id, syn_score_by_id = await fetch_hero_ally_synergies(hero_id, ally_ids, bracket)
+        id_to_name = {
+            hid: n for n in metrics.lane_allies if (hid := _find_hero_id(n, heroes_data)) is not None
+        }
+        metrics.lane_ally_synergies = {
+            id_to_name[hid]: wr for hid, wr in syn_by_id.items() if hid in id_to_name
+        }
+        metrics.lane_ally_synergy_scores = {
+            id_to_name[hid]: s for hid, s in syn_score_by_id.items() if hid in id_to_name
+        }
 
 
 async def enrich(

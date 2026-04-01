@@ -1,10 +1,36 @@
 """Stratz GraphQL API client for accurate pos 1-5 role detection and bracket benchmarks."""
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
+from pathlib import Path
 
 import httpx
+
+_CACHE_DIR = Path.home() / ".dota_coach" / "cache"
+_MATCHUP_TTL = 3600 * 24 * 7  # 7 days
+
+
+def _read_matchup_cache(name: str) -> dict | None:
+    path = _CACHE_DIR / name
+    if not path.exists():
+        return None
+    try:
+        if time.time() - path.stat().st_mtime > _MATCHUP_TTL:
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_matchup_cache(name: str, data) -> None:
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _CACHE_DIR / name
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, path)
 
 STRATZ_GRAPHQL_URL = "https://api.stratz.com/graphql"
 
@@ -53,6 +79,18 @@ query HeroItemBootstrap($heroId: Short!, $bracket: RankBracketBasicEnum!) {
       winCount
       matchCount
       avgTime
+    }
+  }
+}
+"""
+
+_MATCHUP_QUERY = """
+query HeroMatchUp($heroId: Short!, $heroIds: [Short], $bracket: RankBracketBasicEnum!) {
+  heroStats {
+    matchUp(heroId: $heroId, heroIds: $heroIds, bracketBasicIds: [$bracket]) {
+      heroId
+      vs { heroId2 matchCount winCount winRateHeroId1 }
+      with { heroId2 matchCount winCount synergy winRateHeroId1 }
     }
   }
 }
@@ -209,6 +247,218 @@ async def get_hero_item_bootstrap(hero_id: int, bracket: str) -> list[dict]:
         return []
 
     return result
+
+
+async def fetch_hero_matchup_winrates(
+    hero_id: int,
+    enemy_hero_ids: list[int],
+    bracket: str = "LEGEND_ANCIENT",
+) -> dict[int, float]:
+    """Fetch bracket-filtered matchup win rates for a hero against specific enemies.
+
+    Queries the Stratz matchUp GraphQL endpoint and returns a mapping of
+    enemy_hero_id -> win_rate (winCount / matchCount) from the hero's perspective.
+
+    Results are cached for 7 days under stratz_matchup_{hero_id}_{bracket}.json.
+    The full matchUp response (vs + with) is cached so the same data can serve
+    the ally synergy use case without re-fetching.
+
+    Args:
+        hero_id: OpenDota/Dota2 hero ID of the player's hero.
+        enemy_hero_ids: List of enemy hero IDs to query matchup data for.
+        bracket: STRATZ RankBracketBasicEnum value, e.g. "LEGEND_ANCIENT".
+
+    Returns:
+        dict mapping each enemy hero_id to its win rate float (0.0–1.0), or
+        an empty dict on any fetch failure (graceful degradation).
+    """
+    if not enemy_hero_ids:
+        return {}
+
+    api_key = os.environ.get("STRATZ_API_KEY", "").strip()
+    if not api_key:
+        return {}
+
+    cache_key = f"stratz_matchup_{hero_id}_{bracket}.json"
+    cached = _read_matchup_cache(cache_key)
+
+    if cached is None:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    STRATZ_GRAPHQL_URL,
+                    json={
+                        "query": _MATCHUP_QUERY,
+                        "variables": {
+                            "heroId": hero_id,
+                            "heroIds": enemy_hero_ids,
+                            "bracket": bracket,
+                        },
+                    },
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "STRATZ_API",
+                    },
+                )
+                if not response.is_success:
+                    logger.warning(
+                        "STRATZ matchup request failed for hero %s: HTTP %s — %s",
+                        hero_id, response.status_code, response.text[:500],
+                    )
+                    return {}
+                data = response.json()
+        except Exception as exc:
+            logger.warning("STRATZ matchup request failed for hero %s: %s", hero_id, exc)
+            return {}
+
+        if "errors" in data:
+            logger.warning(
+                "STRATZ matchup GraphQL errors for hero %s: %s",
+                hero_id, data["errors"],
+            )
+            return {}
+
+        try:
+            matchup_list = data["data"]["heroStats"]["matchUp"]
+        except (KeyError, TypeError) as exc:
+            logger.warning(
+                "Unexpected STRATZ matchup response shape for hero %s: %s", hero_id, exc
+            )
+            return {}
+
+        if not isinstance(matchup_list, list):
+            return {}
+
+        _write_matchup_cache(cache_key, matchup_list)
+        cached = matchup_list
+
+    # cached is a list of matchUp entries; find the one for our hero_id
+    try:
+        hero_entry = next((e for e in cached if e.get("heroId") == hero_id), None)
+        if hero_entry is None:
+            return {}
+
+        vs_list = hero_entry.get("vs") or []
+        enemy_set = set(enemy_hero_ids)
+        result: dict[int, float] = {}
+        for entry in vs_list:
+            h2 = entry.get("heroId2")
+            if h2 not in enemy_set:
+                continue
+            match_count = entry.get("matchCount") or 0
+            win_count = entry.get("winCount") or 0
+            if match_count > 0:
+                result[h2] = win_count / match_count
+        return result
+    except Exception as exc:
+        logger.warning("Error processing STRATZ matchup cache for hero %s: %s", hero_id, exc)
+        return {}
+
+
+async def fetch_hero_ally_synergies(
+    hero_id: int,
+    ally_hero_ids: list[int],
+    bracket: str = "LEGEND_ANCIENT",
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Fetch bracket-filtered ally synergy data for a hero laning alongside specific allies.
+
+    Reads from the same cache as ``fetch_hero_matchup_winrates`` — if no cache exists,
+    fetches the Stratz matchUp query with the given ally_hero_ids and caches the result.
+
+    Args:
+        hero_id: OpenDota/Dota2 hero ID of the player's hero.
+        ally_hero_ids: List of ally hero IDs to query synergy data for.
+        bracket: STRATZ RankBracketBasicEnum value, e.g. "LEGEND_ANCIENT".
+
+    Returns:
+        Tuple of (wr_map, syn_map) where:
+          - wr_map: dict mapping ally hero_id to pairwise win rate (winCount / matchCount)
+          - syn_map: dict mapping ally hero_id to Stratz synergy score (delta above baseline)
+        Returns ({}, {}) on any error (graceful degradation).
+    """
+    if not ally_hero_ids:
+        return {}, {}
+
+    api_key = os.environ.get("STRATZ_API_KEY", "").strip()
+    if not api_key:
+        return {}, {}
+
+    # Same cache key as fetch_hero_matchup_winrates — enrich_lane_matchup in enricher.py
+    # calls fetch_hero_matchup_winrates with combined ally+enemy IDs first, so the cache
+    # is already warm when this function is called.
+    cache_key = f"stratz_matchup_{hero_id}_{bracket}.json"
+    cached = _read_matchup_cache(cache_key)
+
+    if cached is None:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    STRATZ_GRAPHQL_URL,
+                    json={
+                        "query": _MATCHUP_QUERY,
+                        "variables": {
+                            "heroId": hero_id,
+                            "heroIds": ally_hero_ids,
+                            "bracket": bracket,
+                        },
+                    },
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "STRATZ_API",
+                    },
+                )
+                if not response.is_success:
+                    logger.warning(
+                        "STRATZ matchup (ally) request failed for hero %s: HTTP %s — %s",
+                        hero_id, response.status_code, response.text[:500],
+                    )
+                    return {}, {}
+                data = response.json()
+        except Exception as exc:
+            logger.warning("STRATZ matchup (ally) request failed for hero %s: %s", hero_id, exc)
+            return {}, {}
+
+        if "errors" in data:
+            logger.warning(
+                "STRATZ matchup (ally) GraphQL errors for hero %s: %s",
+                hero_id, data["errors"],
+            )
+            return {}, {}
+
+        try:
+            matchup_list = data["data"]["heroStats"]["matchUp"]
+        except (KeyError, TypeError) as exc:
+            logger.warning(
+                "Unexpected STRATZ matchup (ally) response shape for hero %s: %s", hero_id, exc
+            )
+            return {}, {}
+
+        if not isinstance(matchup_list, list):
+            return {}, {}
+
+        _write_matchup_cache(cache_key, matchup_list)
+        cached = matchup_list
+
+    # Extract with[] data for requested allies
+    try:
+        ally_set = set(ally_hero_ids)
+        wr_map: dict[int, float] = {}
+        syn_map: dict[int, float] = {}
+        for entry in cached:
+            for w in entry.get("with", []):
+                if w.get("heroId2") in ally_set:
+                    mc = w.get("matchCount") or 0
+                    wc = w.get("winCount") or 0
+                    syn = w.get("synergy") or 0.0
+                    if mc > 0:
+                        wr_map[w["heroId2"]] = wc / mc
+                        syn_map[w["heroId2"]] = float(syn)
+        return wr_map, syn_map
+    except Exception as exc:
+        logger.warning("Error processing STRATZ matchup (ally) cache for hero %s: %s", hero_id, exc)
+        return {}, {}
 
 
 async def get_match_positions(match_id: int) -> dict[int, int] | None:

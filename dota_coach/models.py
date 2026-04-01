@@ -52,6 +52,11 @@ class MatchMetrics(BaseModel):
     opponent_net_worth_at_20: int          # enemy player with same lane_role
     team_net_worth_at_20: int = 0          # sum of all 5 allies at 20 min
     enemy_team_net_worth_at_20: int = 0    # sum of all 5 enemies at 20 min
+    lane_enemies: list[str] = []           # localized hero names of enemies in the player's lane
+    lane_allies: list[str] = []            # localized hero names of allied heroes in the same lane (excluding self)
+    lane_ally_synergies: dict[str, float] = {}       # ally hero name -> WR when playing together
+    lane_ally_synergy_scores: dict[str, float] = {}  # ally hero name -> Stratz synergy score
+    lane_matchup_winrates: dict[str, float] = {}     # enemy hero name -> our hero's WR against them
 
     # Farming
     gpm: int

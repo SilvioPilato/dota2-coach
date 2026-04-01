@@ -112,6 +112,57 @@ def build_system_prompt(role: int = 1, turbo: bool = False) -> str:
     )
 
 
+def _lane_line(metrics) -> "str | None":
+    """Build the 'Lane: Hero + ally (synergy X) vs enemy (WR%)' line. Returns None if no lane_enemies."""
+    if not metrics.lane_enemies:
+        return None
+
+    synergy_map = getattr(metrics, "lane_ally_synergy_scores", {})
+
+    # Build ally strings with per-ally synergy score when available
+    if metrics.lane_allies:
+        ally_parts = []
+        for ally in metrics.lane_allies:
+            score = synergy_map.get(ally)
+            if score is not None:
+                ally_parts.append(f"{ally} (synergy {score:+.1f})")
+            else:
+                ally_parts.append(ally)
+        our_side = f"{metrics.hero} + {' + '.join(ally_parts)}"
+    else:
+        our_side = metrics.hero
+
+    # Build enemy strings with WR when available
+    wr_map = getattr(metrics, "lane_matchup_winrates", {})
+    enemy_parts = []
+    for enemy in metrics.lane_enemies:
+        wr = wr_map.get(enemy)
+        if wr is not None:
+            enemy_parts.append(f"{enemy} ({wr:.1%} WR)")
+        else:
+            enemy_parts.append(enemy)
+    enemies_str = " + ".join(enemy_parts)
+
+    line = f"- Lane: {our_side} vs {enemies_str}"
+
+    # Add synergy context label based on average synergy score across allies
+    if synergy_map and metrics.lane_allies:
+        scores = [synergy_map[ally] for ally in metrics.lane_allies if ally in synergy_map]
+        if scores:
+            avg_synergy = sum(scores) / len(scores)
+            if avg_synergy > 5:
+                line += " \u2014 good lane synergy"
+            elif avg_synergy < -3:
+                line += " \u2014 weak synergy"
+    else:
+        # Fallback: flag unfavorable lane from WR data when no synergy data
+        wrs = [wr_map[e] for e in metrics.lane_enemies if e in wr_map]
+        if wrs and (sum(wrs) / len(wrs)) < 0.47:
+            line += " \u2014 unfavorable lane"
+
+    return line
+
+
 def _benchmark_line(benchmarks: list[HeroBenchmark], metric: str, label: str, value: float) -> str:
     """Format a metric line with percentile info if benchmark available."""
     bench = next((b for b in benchmarks if b.metric == metric), None)
@@ -142,6 +193,9 @@ def build_user_message(
 
     # --- Role-specific PERFORMANCE block ---
     lines.append("PERFORMANCE (percentiles are global, all brackets, this hero):")
+    lane = _lane_line(metrics)
+    if lane:
+        lines.append(lane)
 
     if role in (1, 2):
         # Pos 1/2: GPM, LH, first core, NW deltas
@@ -280,6 +334,9 @@ def _build_chat_system_prompt(ctx: "MatchReport") -> str:
     lines.append("MATCH METRICS:")
     lines.append(f"Hero: {m.hero} | Role: pos {ctx.role} ({role_label}) | Result: {m.result.upper()} | Duration: {m.duration_minutes:.0f} min")
     lines.append(f"GPM: {m.gpm} | XPM: {m.xpm} | LH@10: {m.lh_at_10} | Denies@10: {m.denies_at_10}")
+    lane = _lane_line(m)
+    if lane:
+        lines.append(lane)
     if m.death_events:
         lines.append(f"Deaths before 10: {m.deaths_before_10}")
         for de in m.death_events:
