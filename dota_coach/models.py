@@ -56,6 +56,7 @@ class MatchMetrics(BaseModel):
     lane_allies: list[str] = []            # localized hero names of allied heroes in the same lane (excluding self)
     lane_ally_synergies: dict[str, float] = {}       # ally hero name -> WR when playing together
     lane_ally_synergy_scores: dict[str, float] = {}  # ally hero name -> Stratz synergy score
+    lane_matchup_winrates: dict[str, float] = {}     # enemy hero name -> our hero's WR against them
 
     # Farming
     gpm: int

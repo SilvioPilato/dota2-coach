@@ -384,8 +384,9 @@ async def fetch_hero_ally_synergies(
     if not api_key:
         return {}, {}
 
-    # Same cache key as fetch_hero_matchup_winrates — zpo task will coordinate
-    # combined ally+enemy IDs to populate a single cache entry.
+    # Same cache key as fetch_hero_matchup_winrates — enrich_lane_matchup in enricher.py
+    # calls fetch_hero_matchup_winrates with combined ally+enemy IDs first, so the cache
+    # is already warm when this function is called.
     cache_key = f"stratz_matchup_{hero_id}_{bracket}.json"
     cached = _read_matchup_cache(cache_key)
 
