@@ -41,7 +41,7 @@ async def get_paginated_matches(account_id: int, limit: int = 20, offset: int = 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
             f"{BASE_URL}/players/{account_id}/matches",
-            params={"limit": limit, "offset": offset},
+            params={"limit": limit, "offset": offset, "significant": 0},
         )
         response.raise_for_status()
         return response.json()
