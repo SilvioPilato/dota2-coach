@@ -51,6 +51,8 @@ class MatchSummary(BaseModel):
     assists: int
     analyzed: bool           # True if in our local history DB
     replay_available: bool   # True if start_time is within 7 days
+    game_mode: int = 0       # OpenDota game_mode ID (23 = Turbo, 1 = All Pick, etc.)
+    lobby_type: int = 0      # OpenDota lobby_type ID (7 = Ranked, 0 = Unranked, etc.)
 
 
 _HERO_NAMES: dict[int, str] = {
@@ -369,11 +371,11 @@ async def get_report(account_id: int, match_id: int):
 # ---------------------------------------------------------------------------
 
 @app.get("/recent-matches/{account_id}")
-async def recent_matches(account_id: int):
+async def recent_matches(account_id: int, offset: int = 0):
     """Return OpenDota recent matches joined with local analysis status."""
     from datetime import datetime, timezone
     from dota_coach.history import get_analyzed_ids
-    from dota_coach.opendota import get_recent_matches as opendota_recent
+    from dota_coach.opendota import get_paginated_matches
 
     # Normalize Steam 64-bit ID → OpenDota 32-bit account ID
     _STEAM64_BASE = 76561197960265728
@@ -381,7 +383,7 @@ async def recent_matches(account_id: int):
         account_id = account_id - _STEAM64_BASE
 
     try:
-        raw = await opendota_recent(account_id, limit=20)
+        raw = await get_paginated_matches(account_id, limit=20, offset=offset)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"OpenDota error: {exc}")
 
@@ -410,6 +412,8 @@ async def recent_matches(account_id: int):
             assists=m.get("assists", 0),
             analyzed=match_id in analyzed_ids,
             replay_available=(now_ts - start_time) < seven_days,
+            game_mode=m.get("game_mode", 0),
+            lobby_type=m.get("lobby_type", 0),
         ))
 
     return JSONResponse(content=[s.model_dump() for s in summaries])
