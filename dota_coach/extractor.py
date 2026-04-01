@@ -644,6 +644,29 @@ def extract_metrics_from_opendota(
     result = "win" if our_meta.get("win") else "loss"
     denies_at_10 = 0  # not available per-minute from match_meta
 
+    # Lane matchup extraction
+    OPPOSING_LANE: dict[int, int] = {1: 3, 2: 2, 3: 1}
+    our_lane = our_meta.get("lane")
+    enemy_lane = OPPOSING_LANE.get(our_lane) if our_lane else None
+
+    def _hero_name(p: dict) -> str:
+        return p.get("hero", {}).get("localized_name", "") or str(p.get("hero_id", "Unknown"))
+
+    if our_lane and enemy_lane:
+        lane_allies = [
+            _hero_name(p)
+            for p in allies
+            if p.get("account_id") != our_account_id and p.get("lane") == our_lane
+        ]
+        lane_enemies = [
+            _hero_name(p)
+            for p in enemies
+            if p.get("lane") == enemy_lane
+        ]
+    else:
+        lane_allies = []
+        lane_enemies = []
+
     return MatchMetrics(
         match_id=match_meta["match_id"],
         hero=our_hero_name,
@@ -678,6 +701,8 @@ def extract_metrics_from_opendota(
         stun_time=our_meta.get("stuns"),
         tower_damage=our_meta.get("tower_damage"),
         turbo=match_meta.get("game_mode") == 23,
+        lane_enemies=lane_enemies,
+        lane_allies=lane_allies,
     )
 
 

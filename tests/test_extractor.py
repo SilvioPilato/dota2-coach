@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dota_coach.extractor import extract_metrics
+from dota_coach.extractor import extract_metrics, extract_metrics_from_opendota
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
@@ -211,3 +211,135 @@ def test_teamfight_none(records):
     ]
     m = extract_metrics(stripped, DROW_ACCOUNT_ID, MATCH_META)
     assert m.teamfight_participation_rate is None
+
+
+# ---------------------------------------------------------------------------
+# extract_metrics_from_opendota — lane matchup extraction
+# ---------------------------------------------------------------------------
+
+def _make_player(account_id, is_radiant, lane, hero_name, lane_role=1, **extra):
+    p = {
+        "account_id": account_id,
+        "isRadiant": is_radiant,
+        "lane": lane,
+        "lane_role": lane_role,
+        "hero": {"localized_name": hero_name},
+        "win": 0,
+        "gold_per_min": 300,
+        "xp_per_min": 400,
+    }
+    p.update(extra)
+    return p
+
+
+def _make_opendota_match(our_player, other_players, game_mode=0):
+    return {
+        "match_id": 1111111111,
+        "duration": 1800,
+        "game_mode": game_mode,
+        "players": [our_player] + other_players,
+    }
+
+
+def test_lane_enemies_safe_lane():
+    """Radiant safe (lane=1) player should see Dire offlane (lane=3) as enemies."""
+    our_id = 100
+    our = _make_player(our_id, True, lane=1, hero_name="Drow Ranger")
+    ally_safe = _make_player(101, True, lane=1, hero_name="Crystal Maiden")
+    ally_mid = _make_player(102, True, lane=2, hero_name="Storm Spirit")
+    enemy_off = _make_player(201, False, lane=3, hero_name="Axe")
+    enemy_off2 = _make_player(202, False, lane=3, hero_name="Ancient Apparition")
+    enemy_mid = _make_player(203, False, lane=2, hero_name="Puck")
+
+    match = _make_opendota_match(our, [ally_safe, ally_mid, enemy_off, enemy_off2, enemy_mid])
+    m = extract_metrics_from_opendota(our_id, match)
+
+    assert set(m.lane_enemies) == {"Axe", "Ancient Apparition"}
+    assert m.lane_allies == ["Crystal Maiden"]
+
+
+def test_lane_enemies_offlane():
+    """Radiant offlane (lane=3) player should see Dire safe (lane=1) as enemies."""
+    our_id = 100
+    our = _make_player(our_id, True, lane=3, hero_name="Tidehunter")
+    ally_off = _make_player(101, True, lane=3, hero_name="Earthshaker")
+    enemy_safe = _make_player(201, False, lane=1, hero_name="Juggernaut")
+    enemy_safe2 = _make_player(202, False, lane=1, hero_name="Io")
+
+    match = _make_opendota_match(our, [ally_off, enemy_safe, enemy_safe2])
+    m = extract_metrics_from_opendota(our_id, match)
+
+    assert set(m.lane_enemies) == {"Juggernaut", "Io"}
+    assert m.lane_allies == ["Earthshaker"]
+
+
+def test_lane_enemies_midlane():
+    """Mid (lane=2) player should see enemy mid as opponent."""
+    our_id = 100
+    our = _make_player(our_id, True, lane=2, hero_name="Invoker")
+    enemy_mid = _make_player(201, False, lane=2, hero_name="Sniper")
+    enemy_safe = _make_player(202, False, lane=1, hero_name="Wraith King")
+
+    match = _make_opendota_match(our, [enemy_mid, enemy_safe])
+    m = extract_metrics_from_opendota(our_id, match)
+
+    assert m.lane_enemies == ["Sniper"]
+    assert m.lane_allies == []
+
+
+def test_lane_matchup_no_lane_field():
+    """When lane field is absent, lane_enemies and lane_allies default to empty."""
+    our_id = 100
+    our = {
+        "account_id": our_id,
+        "isRadiant": True,
+        "lane_role": 1,
+        "hero": {"localized_name": "Drow Ranger"},
+        "win": 0,
+        "gold_per_min": 300,
+        "xp_per_min": 400,
+    }
+    enemy = {
+        "account_id": 201,
+        "isRadiant": False,
+        "lane": 3,
+        "hero": {"localized_name": "Axe"},
+        "lane_role": 1,
+        "win": 1,
+    }
+    match = _make_opendota_match(our, [enemy])
+    m = extract_metrics_from_opendota(our_id, match)
+
+    assert m.lane_enemies == []
+    assert m.lane_allies == []
+
+
+def test_lane_matchup_jungle_lane_returns_empty():
+    """When our lane is 4 (jungle/roaming), return empty lists."""
+    our_id = 100
+    our = _make_player(our_id, True, lane=4, hero_name="Enigma")
+    enemy = _make_player(201, False, lane=1, hero_name="Juggernaut")
+
+    match = _make_opendota_match(our, [enemy])
+    m = extract_metrics_from_opendota(our_id, match)
+
+    assert m.lane_enemies == []
+    assert m.lane_allies == []
+
+
+def test_lane_matchup_hero_id_fallback():
+    """When hero localized_name is absent, fall back to hero_id string."""
+    our_id = 100
+    our = _make_player(our_id, True, lane=1, hero_name="Drow Ranger")
+    enemy_no_name = {
+        "account_id": 201,
+        "isRadiant": False,
+        "lane": 3,
+        "hero_id": 42,
+        "lane_role": 1,
+        "win": 1,
+    }
+    match = _make_opendota_match(our, [enemy_no_name])
+    m = extract_metrics_from_opendota(our_id, match)
+
+    assert m.lane_enemies == ["42"]
