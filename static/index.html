@@ -895,6 +895,9 @@ async function loadSidebarPage(accountId) {
     } else {
       sidebarOffset += 20;
       if (sentinel) sentinel.innerHTML = '';
+      // If content doesn't yet overflow the container, the observer won't fire
+      // on scroll — proactively load the next page.
+      if (list.scrollHeight <= list.clientHeight) loadSidebarPage(accountId);
     }
   } catch (e) {
     if (sentinel) {
