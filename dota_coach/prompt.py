@@ -113,14 +113,32 @@ def build_system_prompt(role: int = 1, turbo: bool = False) -> str:
 
 
 def _lane_line(metrics) -> "str | None":
-    """Build the 'Lane: Hero + ally vs enemy' line. Returns None if no lane_enemies."""
+    """Build the 'Lane: Hero + ally vs enemy (WR%)' line. Returns None if no lane_enemies."""
     if not metrics.lane_enemies:
         return None
 
     allies_str = " + ".join(metrics.lane_allies) if metrics.lane_allies else ""
     our_side = f"{metrics.hero} + {allies_str}" if allies_str else metrics.hero
-    enemies_str = " + ".join(metrics.lane_enemies)
-    return f"- Lane: {our_side} vs {enemies_str}"
+
+    # Build enemy strings with WR when available
+    wr_map = getattr(metrics, "lane_matchup_winrates", {})
+    enemy_parts = []
+    for enemy in metrics.lane_enemies:
+        wr = wr_map.get(enemy)
+        if wr is not None:
+            enemy_parts.append(f"{enemy} ({wr:.1%} WR)")
+        else:
+            enemy_parts.append(enemy)
+    enemies_str = " + ".join(enemy_parts)
+
+    # Check if unfavorable (avg WR < 47%)
+    wrs = [wr_map[e] for e in metrics.lane_enemies if e in wr_map]
+    unfavorable = wrs and (sum(wrs) / len(wrs)) < 0.47
+
+    line = f"- Lane: {our_side} vs {enemies_str}"
+    if unfavorable:
+        line += " \u2014 unfavorable lane"
+    return line
 
 
 def _benchmark_line(benchmarks: list[HeroBenchmark], metric: str, label: str, value: float) -> str:

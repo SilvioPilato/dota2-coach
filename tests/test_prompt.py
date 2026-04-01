@@ -402,3 +402,100 @@ def test_chat_system_prompt_omits_lane_line_when_no_enemies():
     report = _make_match_report(m)
     content = _build_chat_system_prompt(report)
     assert "- Lane:" not in content
+
+
+# ---------------------------------------------------------------------------
+# Lane matchup win rate formatting
+# ---------------------------------------------------------------------------
+
+def test_lane_line_wr_shown_for_enemy_with_winrate():
+    """Enemy with WR entry shows '(48.2% WR)' format."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe"],
+        lane_allies=[],
+        lane_matchup_winrates={"Axe": 0.482},
+    )
+    result = _lane_line(m)
+    assert result == "- Lane: Juggernaut vs Axe (48.2% WR)"
+
+
+def test_lane_line_wr_fallback_plain_name_when_no_winrate():
+    """Enemy without WR entry shows plain name (fallback)."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe"],
+        lane_allies=[],
+        lane_matchup_winrates={},
+    )
+    result = _lane_line(m)
+    assert result == "- Lane: Juggernaut vs Axe"
+
+
+def test_lane_line_unfavorable_label_when_avg_wr_below_47():
+    """avg WR < 0.47 appends ' — unfavorable lane'."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe", "Pudge"],
+        lane_allies=["Lion"],
+        lane_matchup_winrates={"Axe": 0.42, "Pudge": 0.45},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "\u2014 unfavorable lane" in result
+
+
+def test_lane_line_no_unfavorable_label_when_avg_wr_at_or_above_47():
+    """avg WR >= 0.47 does NOT append the unfavorable label."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe", "Pudge"],
+        lane_allies=["Lion"],
+        lane_matchup_winrates={"Axe": 0.50, "Pudge": 0.48},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "unfavorable" not in result
+
+
+def test_lane_line_mixed_wr_one_with_one_without():
+    """One enemy has WR, one does not — WR shown only for the known enemy."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe", "Pudge"],
+        lane_allies=["Lion"],
+        lane_matchup_winrates={"Axe": 0.531},
+    )
+    result = _lane_line(m)
+    assert result is not None
+    assert "Axe (53.1% WR)" in result
+    assert "Pudge" in result
+    # Pudge should appear without WR annotation
+    assert "Pudge (" not in result
+
+
+def test_lane_line_wr_empty_map_no_unfavorable_label():
+    """When lane_matchup_winrates is empty, no unfavorable label is added."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe"],
+        lane_allies=[],
+        lane_matchup_winrates={},
+    )
+    result = _lane_line(m)
+    assert result == "- Lane: Juggernaut vs Axe"
+    assert "unfavorable" not in result
+
+
+def test_lane_line_wr_in_chat_system_prompt():
+    """WR annotations appear in the chat system prompt recap when winrates are set."""
+    m = _make_metrics(
+        hero="Juggernaut",
+        lane_enemies=["Axe", "Pudge"],
+        lane_allies=["Lion"],
+        lane_matchup_winrates={"Axe": 0.482, "Pudge": 0.531},
+    )
+    report = _make_match_report(m)
+    content = _build_chat_system_prompt(report)
+    assert "Axe (48.2% WR)" in content
+    assert "Pudge (53.1% WR)" in content
