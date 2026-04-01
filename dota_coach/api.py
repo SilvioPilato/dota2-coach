@@ -279,6 +279,20 @@ async def analyze(req: AnalyzeRequest):
             timeline = build_timeline(records, our_npc, metrics.hero)
 
         enrichment = await enrich(metrics, match_meta)
+
+        # Enrich lane ally synergy data (mutates metrics in place)
+        from dota_coach.enricher import enrich_lane_synergy
+        from dota_coach.stratz import rank_tier_to_stratz_bracket
+        _our_player_meta = next(
+            (p for p in match_meta.get("players", []) if p.get("account_id") is not None),
+            None,
+        )
+        _rank_tier: int = (_our_player_meta or {}).get("rank_tier") or 0
+        _bracket = rank_tier_to_stratz_bracket(_rank_tier) if _rank_tier else "LEGEND_ANCIENT"
+        from dota_coach.enricher import _get_heroes_data
+        _heroes_data = await _get_heroes_data()
+        await enrich_lane_synergy(metrics, _bracket, _heroes_data)
+
         errors = detect_errors(metrics, role_profile=role_profile, enrichment=enrichment)
         yield step("enrich", "done", phase_ms=elapsed_phase_ms())
 

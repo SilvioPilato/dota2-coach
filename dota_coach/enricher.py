@@ -264,6 +264,54 @@ def _median_from_benchmarks(benchmarks_result: list[dict]) -> float:
     return closest["value"]
 
 
+async def enrich_lane_synergy(
+    metrics: Any,
+    bracket: str,
+    heroes_data: dict,
+) -> None:
+    """Fetch and attach Stratz lane ally synergy data to metrics (mutates in place).
+
+    Resolves ally hero names from metrics.lane_allies to hero IDs, queries
+    fetch_hero_ally_synergies, and stores results in metrics.lane_ally_synergies
+    and metrics.lane_ally_synergy_scores.
+
+    Args:
+        metrics: MatchMetrics instance to mutate.
+        bracket: STRATZ RankBracketBasicEnum value (e.g. "LEGEND_ANCIENT").
+        heroes_data: Heroes data dict from dotaconstants heroes.json.
+    """
+    from dota_coach.stratz import fetch_hero_ally_synergies
+
+    hero_id = _find_hero_id(metrics.hero, heroes_data)
+    if hero_id is None:
+        return
+
+    ally_ids = [
+        id_
+        for name in metrics.lane_allies
+        if (id_ := _find_hero_id(name, heroes_data)) is not None
+    ]
+    if not ally_ids:
+        return
+
+    wr_by_id, syn_by_id = await fetch_hero_ally_synergies(hero_id, ally_ids, bracket)
+
+    id_to_name = {
+        _find_hero_id(n, heroes_data): n
+        for n in metrics.lane_allies
+    }
+    metrics.lane_ally_synergies = {
+        id_to_name[hid]: wr
+        for hid, wr in wr_by_id.items()
+        if hid in id_to_name
+    }
+    metrics.lane_ally_synergy_scores = {
+        id_to_name[hid]: s
+        for hid, s in syn_by_id.items()
+        if hid in id_to_name
+    }
+
+
 async def enrich(
     metrics: Any,
     match_meta: dict,

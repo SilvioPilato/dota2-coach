@@ -356,6 +356,108 @@ async def fetch_hero_matchup_winrates(
         return {}
 
 
+async def fetch_hero_ally_synergies(
+    hero_id: int,
+    ally_hero_ids: list[int],
+    bracket: str = "LEGEND_ANCIENT",
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Fetch bracket-filtered ally synergy data for a hero laning alongside specific allies.
+
+    Reads from the same cache as ``fetch_hero_matchup_winrates`` — if no cache exists,
+    fetches the Stratz matchUp query with the given ally_hero_ids and caches the result.
+
+    Args:
+        hero_id: OpenDota/Dota2 hero ID of the player's hero.
+        ally_hero_ids: List of ally hero IDs to query synergy data for.
+        bracket: STRATZ RankBracketBasicEnum value, e.g. "LEGEND_ANCIENT".
+
+    Returns:
+        Tuple of (wr_map, syn_map) where:
+          - wr_map: dict mapping ally hero_id to pairwise win rate (winCount / matchCount)
+          - syn_map: dict mapping ally hero_id to Stratz synergy score (delta above baseline)
+        Returns ({}, {}) on any error (graceful degradation).
+    """
+    if not ally_hero_ids:
+        return {}, {}
+
+    api_key = os.environ.get("STRATZ_API_KEY", "").strip()
+    if not api_key:
+        return {}, {}
+
+    cache_key = f"stratz_matchup_{hero_id}_{bracket}.json"
+    cached = _read_matchup_cache(cache_key)
+
+    if cached is None:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    STRATZ_GRAPHQL_URL,
+                    json={
+                        "query": _MATCHUP_QUERY,
+                        "variables": {
+                            "heroId": hero_id,
+                            "heroIds": ally_hero_ids,
+                            "bracket": bracket,
+                        },
+                    },
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "STRATZ_API",
+                    },
+                )
+                if not response.is_success:
+                    logger.warning(
+                        "STRATZ matchup (ally) request failed for hero %s: HTTP %s — %s",
+                        hero_id, response.status_code, response.text[:500],
+                    )
+                    return {}, {}
+                data = response.json()
+        except Exception as exc:
+            logger.warning("STRATZ matchup (ally) request failed for hero %s: %s", hero_id, exc)
+            return {}, {}
+
+        if "errors" in data:
+            logger.warning(
+                "STRATZ matchup (ally) GraphQL errors for hero %s: %s",
+                hero_id, data["errors"],
+            )
+            return {}, {}
+
+        try:
+            matchup_list = data["data"]["heroStats"]["matchUp"]
+        except (KeyError, TypeError) as exc:
+            logger.warning(
+                "Unexpected STRATZ matchup (ally) response shape for hero %s: %s", hero_id, exc
+            )
+            return {}, {}
+
+        if not isinstance(matchup_list, list):
+            return {}, {}
+
+        _write_matchup_cache(cache_key, matchup_list)
+        cached = matchup_list
+
+    # Extract with[] data for requested allies
+    try:
+        ally_set = set(ally_hero_ids)
+        wr_map: dict[int, float] = {}
+        syn_map: dict[int, float] = {}
+        for entry in cached:
+            for w in entry.get("with", []):
+                if w.get("heroId2") in ally_set:
+                    mc = w.get("matchCount") or 0
+                    wc = w.get("winCount") or 0
+                    syn = w.get("synergy") or 0.0
+                    if mc > 0:
+                        wr_map[w["heroId2"]] = wc / mc
+                        syn_map[w["heroId2"]] = float(syn)
+        return wr_map, syn_map
+    except Exception as exc:
+        logger.warning("Error processing STRATZ matchup (ally) cache for hero %s: %s", hero_id, exc)
+        return {}, {}
+
+
 async def get_match_positions(match_id: int) -> dict[int, int] | None:
     """Return a mapping of account_id (32-bit) → position (1-5) using Stratz GraphQL.
 
