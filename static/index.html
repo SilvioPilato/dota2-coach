@@ -849,7 +849,7 @@ async function loadSidebar(accountId) {
   // Observe sentinel to trigger next-page loads
   sidebarObserver = new IntersectionObserver(entries => {
     if (entries[0].isIntersecting) loadSidebarPage(sidebarAccountId);
-  }, { threshold: 0.1 });
+  }, { root: list, threshold: 0.1 });
   sidebarObserver.observe(sentinel);
 
   // Load first page immediately
