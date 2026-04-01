@@ -16,6 +16,7 @@ from dota_coach.enricher import (
     _read_cache,
     _write_cache,
     enrich,
+    _discover_lane_heroes,
 )
 from dota_coach.models import MatchMetrics
 
@@ -278,3 +279,101 @@ class TestEnrich:
                     ctx = asyncio.run(enrich(_make_metrics(), FAKE_MATCH_META))
 
         assert ctx.hero_item_bootstrap == []
+
+
+# ---------------------------------------------------------------------------
+# _discover_lane_heroes
+# ---------------------------------------------------------------------------
+
+def _make_heroes_data(*entries: tuple[int, str]) -> dict:
+    """Build minimal heroes_data dict keyed by hero_id string."""
+    return {str(hid): {"localized_name": name, "name": f"npc_dota_hero_{name.lower().replace(' ', '_')}"} for hid, name in entries}
+
+
+def _make_match_meta_players(our_id: int, our_is_radiant: bool, our_lane: int, players: list[dict]) -> dict:
+    our = {"account_id": our_id, "isRadiant": our_is_radiant, "lane": our_lane, "hero_id": 1}
+    return {"match_id": 1, "players": [our] + players}
+
+
+def _blank_metrics() -> MatchMetrics:
+    return _make_metrics(lane_enemies=[], lane_allies=[])
+
+
+class TestDiscoverLaneHeroes:
+    def test_mid_enemy_discovered(self):
+        """Player is mid; opposing mid hero is discovered as lane_enemy."""
+        heroes = _make_heroes_data((9, "Mirana"))
+        match = _make_match_meta_players(
+            our_id=123, our_is_radiant=True, our_lane=2,
+            players=[{"account_id": 999, "isRadiant": False, "lane": 2, "hero_id": 9}],
+        )
+        m = _blank_metrics()
+        _discover_lane_heroes(m, 123, match, heroes)
+        assert m.lane_enemies == ["Mirana"]
+        assert m.lane_allies == []
+
+    def test_safe_lane_ally_discovered(self):
+        """Safe lane carry has an ally support — both discovered."""
+        heroes = _make_heroes_data((1, "Anti-Mage"), (2, "Crystal Maiden"), (3, "Axe"), (4, "Pudge"))
+        match = {
+            "match_id": 1,
+            "players": [
+                {"account_id": 100, "isRadiant": True, "lane": 1, "hero_id": 1},   # our hero
+                {"account_id": 101, "isRadiant": True, "lane": 1, "hero_id": 2},   # ally
+                {"account_id": 200, "isRadiant": False, "lane": 3, "hero_id": 3},  # enemy offlaners
+                {"account_id": 201, "isRadiant": False, "lane": 3, "hero_id": 4},
+            ],
+        }
+        m = _blank_metrics()
+        _discover_lane_heroes(m, 100, match, heroes)
+        assert m.lane_allies == ["Crystal Maiden"]
+        assert set(m.lane_enemies) == {"Axe", "Pudge"}
+
+    def test_hero_id_not_in_heroes_data_excluded(self):
+        """Hero IDs missing from heroes_data are silently skipped."""
+        heroes = _make_heroes_data((9, "Mirana"))  # only Mirana in data
+        match = _make_match_meta_players(
+            our_id=123, our_is_radiant=True, our_lane=2,
+            players=[
+                {"account_id": 999, "isRadiant": False, "lane": 2, "hero_id": 9},
+                {"account_id": 888, "isRadiant": False, "lane": 2, "hero_id": 99},  # unknown id
+            ],
+        )
+        m = _blank_metrics()
+        _discover_lane_heroes(m, 123, match, heroes)
+        assert m.lane_enemies == ["Mirana"]  # unknown hero skipped
+
+    def test_no_lane_data_produces_empty(self):
+        """Players missing lane field don't produce errors — empty lists returned."""
+        heroes = _make_heroes_data((9, "Mirana"))
+        match = {
+            "match_id": 1,
+            "players": [
+                {"account_id": 123, "isRadiant": True, "hero_id": 1},  # no lane field
+                {"account_id": 999, "isRadiant": False, "hero_id": 9},
+            ],
+        }
+        m = _blank_metrics()
+        _discover_lane_heroes(m, 123, match, heroes)
+        assert m.lane_enemies == []
+        assert m.lane_allies == []
+
+    def test_does_not_overwrite_existing_lane_data(self):
+        """enrich_lane_matchup skips discovery when lane_enemies already set."""
+        # Test the guard in enrich_lane_matchup, not _discover_lane_heroes directly
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from dota_coach.enricher import enrich_lane_matchup
+
+        heroes = _make_heroes_data((9, "Mirana"))
+        match = _make_match_meta_players(
+            our_id=123, our_is_radiant=True, our_lane=2,
+            players=[{"account_id": 999, "isRadiant": False, "lane": 2, "hero_id": 9}],
+        )
+        m = _make_metrics(lane_enemies=["Lina"], lane_allies=[])  # already populated
+
+        with patch("dota_coach.enricher.fetch_hero_matchup_winrates", new_callable=AsyncMock, return_value={}):
+            asyncio.run(enrich_lane_matchup(m, "LEGEND_ANCIENT", heroes, match_meta=match, our_account_id=123))
+
+        # Should NOT be overwritten
+        assert m.lane_enemies == ["Lina"]

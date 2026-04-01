@@ -650,7 +650,7 @@ def extract_metrics_from_opendota(
     enemy_lane = OPPOSING_LANE.get(our_lane) if our_lane else None
 
     def _hero_name(p: dict) -> str:
-        return p.get("hero", {}).get("localized_name", "") or str(p.get("hero_id", "Unknown"))
+        return (p.get("hero") or {}).get("localized_name", "") or str(p.get("hero_id", "Unknown"))
 
     if our_lane and enemy_lane:
         lane_allies = [

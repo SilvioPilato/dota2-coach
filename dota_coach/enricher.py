@@ -310,12 +310,76 @@ async def enrich_lane_synergy(
     }
 
 
+def _discover_lane_heroes(
+    metrics: Any,
+    our_account_id: int,
+    match_meta: dict,
+    heroes_data: dict,
+) -> None:
+    """Populate metrics.lane_enemies and lane_allies from OpenDota match_meta.
+
+    Called when lane_enemies is empty (replay path doesn't populate it).
+    Uses heroes_data to resolve hero_id -> localized_name.
+    Mutates metrics in place.
+    """
+    # Build reverse map: hero_id (int) -> localized_name
+    id_to_name: dict[int, str] = {}
+    for _hid, info in heroes_data.items():
+        if isinstance(info, dict):
+            name = info.get("localized_name", "")
+            if name:
+                try:
+                    id_to_name[int(_hid)] = name
+                except (ValueError, TypeError):
+                    pass
+
+    players = match_meta.get("players", [])
+    our_meta = next((p for p in players if p.get("account_id") == our_account_id), None)
+    if our_meta is None:
+        return
+
+    our_radiant = our_meta.get("isRadiant")
+    our_lane = our_meta.get("lane")
+    # mid mirrors itself; safe/off swap
+    OPPOSING_LANE: dict[int, int] = {1: 3, 2: 2, 3: 1}
+    enemy_lane = OPPOSING_LANE.get(our_lane) if our_lane else None
+    if not our_lane or not enemy_lane:
+        return
+
+    allies = [p for p in players if p.get("isRadiant") == our_radiant]
+    enemies = [p for p in players if p.get("isRadiant") != our_radiant]
+
+    def _name(p: dict) -> str | None:
+        hero_id = p.get("hero_id")
+        if hero_id is not None:
+            return id_to_name.get(int(hero_id))
+        return None
+
+    metrics.lane_allies = [
+        n for p in allies
+        if p.get("account_id") != our_account_id and p.get("lane") == our_lane
+        if (n := _name(p)) is not None
+    ]
+    metrics.lane_enemies = [
+        n for p in enemies
+        if p.get("lane") == enemy_lane
+        if (n := _name(p)) is not None
+    ]
+
+
 async def enrich_lane_matchup(
     metrics: Any,
     bracket: str,
     heroes_data: dict,
+    match_meta: dict | None = None,
+    our_account_id: int | None = None,
 ) -> None:
     """Fetch Stratz lane matchup (enemy WRs + ally synergy) and attach to metrics.
+
+    If lane_enemies is empty and match_meta + our_account_id are provided,
+    first discovers lane heroes from match_meta using heroes_data for id->name
+    resolution. This covers both the replay path (where extract_metrics doesn't
+    populate lane heroes) and the degraded path.
 
     Resolves both enemy and ally hero names to hero IDs, calls
     fetch_hero_matchup_winrates with the combined set so a single cache entry
@@ -327,7 +391,13 @@ async def enrich_lane_matchup(
         metrics: MatchMetrics instance to mutate.
         bracket: STRATZ RankBracketBasicEnum value (e.g. "LEGEND_ANCIENT").
         heroes_data: Heroes data dict from dotaconstants heroes.json.
+        match_meta: OpenDota match metadata (used for lane discovery when lane_enemies is empty).
+        our_account_id: Player's OpenDota account ID (used for lane discovery).
     """
+    # Discover lane heroes if not already populated (replay path leaves them empty)
+    if not metrics.lane_enemies and match_meta is not None and our_account_id is not None:
+        _discover_lane_heroes(metrics, our_account_id, match_meta, heroes_data)
+
     hero_id = _find_hero_id(metrics.hero, heroes_data)
     if hero_id is None:
         return

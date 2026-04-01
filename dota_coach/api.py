@@ -291,7 +291,7 @@ async def analyze(req: AnalyzeRequest):
         # Enrich lane matchup data: enemy WRs + ally synergy (mutates metrics in place)
         from dota_coach.enricher import enrich_lane_matchup, _get_heroes_data
         _heroes_data = await _get_heroes_data()
-        await enrich_lane_matchup(metrics, _bracket, _heroes_data)
+        await enrich_lane_matchup(metrics, _bracket, _heroes_data, match_meta=match_meta, our_account_id=account_id)
 
         errors = detect_errors(metrics, role_profile=role_profile, enrichment=enrichment)
         yield step("enrich", "done", phase_ms=elapsed_phase_ms())
