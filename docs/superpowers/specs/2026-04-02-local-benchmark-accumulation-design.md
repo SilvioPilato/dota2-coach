@@ -8,6 +8,8 @@
 
 After 30+ non-Turbo matches per hero are stored in the SQLite history DB, compute local percentile distributions (p25/median/p75) as a supplement to OpenDota global benchmarks. Both sources are shown side-by-side in the UI and integrated into error detection and LLM context. A metrics-only import pipeline lets users bootstrap historical data without running full LLM analysis on past matches.
 
+Imported matches count toward the 30-match threshold — the intent is for the user to seed their history with past games so local benchmarks activate immediately.
+
 ---
 
 ## Section 1: Data Models
@@ -46,7 +48,7 @@ New module `dota_coach/importer.py` with an `import_match_metrics(account_id, li
 **Steps:**
 1. Fetch recent match IDs via OpenDota `GET /players/{account_id}/matches?limit={limit}`
 2. Skip match IDs already in the history DB (using existing `get_analyzed_ids()`)
-3. For each remaining match: fetch full match data from OpenDota, run `extractor.extract_metrics()` + `enricher.enrich()` — same pipeline as `/analyze` but stop before the LLM call
+3. For each remaining match: fetch full match data from OpenDota via `GET /matches/{match_id}` (the `match_meta` dict passed to `enrich()` must include the full player list so bracket detection works). Run `extractor.extract_metrics()` + `enricher.enrich()` — same pipeline as `/analyze` but stop before the LLM call. Role detection follows the same two-step path as the full analysis: try Stratz positions first, fall back to `detect_role()`. If role cannot be determined, skip the match and count it as failed.
 4. Save a `MatchReport` with `coaching_report=""`, `errors=[]`, `priority_focus=""`, `timeline=""`, `metrics_only=True`
 
 Matches are processed sequentially to avoid hammering OpenDota. Individual failures are logged and counted, not fatal.
@@ -54,7 +56,8 @@ Matches are processed sequentially to avoid hammering OpenDota. Individual failu
 **API endpoint:** `POST /import-history/{account_id}?limit=50`
 - Response: `{"imported": N, "skipped": M, "failed": K}`
 
-**CLI:** `dota-coach import-history --account-id 12345 --limit 50`
+**CLI:** new file `dota_coach/cli.py`. `pyproject.toml` already has `dota-coach = "dota_coach.cli:main"` — the new file must expose a `main()` entry point (e.g. a Typer `app` with `app()` called from `main()`). Do not change the `pyproject.toml` entry.
+
 - Prints per-match progress and a final summary line
 
 ---
@@ -72,9 +75,15 @@ def get_local_benchmarks(
     Returns ([], count) when count < 30."""
 ```
 
-SQLite query per metric:
+The stored `MatchReport` JSON has metrics nested under `$.metrics` as a `MatchMetrics` object. Field names inside `MatchMetrics` differ from benchmark metric names:
+
+- `gold_per_min` → `$.metrics.gpm` (direct integer field)
+- `xp_per_min` → `$.metrics.xpm` (direct integer field)
+- `last_hits_per_min` → derived: fetch `$.metrics.total_last_hits` and `$.metrics.duration_minutes` separately, compute `total_last_hits / duration_minutes` in Python before percentile calculation
+
+SQLite query for directly-stored metrics (`gpm`, `xpm`):
 ```sql
-SELECT json_extract(report_json, '$.metrics.<metric>') as val
+SELECT json_extract(report_json, '$.metrics.gpm') as val
 FROM match_history
 WHERE account_id = ?
   AND json_extract(report_json, '$.hero') = ?
@@ -82,13 +91,17 @@ WHERE account_id = ?
 ORDER BY analyzed_at DESC LIMIT 500
 ```
 
+For `last_hits_per_min`, fetch `total_last_hits` and `duration_minutes` in the same query and compute `total_last_hits / duration_minutes` in Python before percentile calculation.
+
+The `turbo` filter uses `json_extract(...) = 0`. SQLite's `json_extract` returns JSON `false` as integer `0`, which is stable as long as the field is serialised as a JSON boolean (Python's `json.dumps(False)` → `false`). This is guaranteed by Pydantic's default serialisation of `bool` fields.
+
 Percentile math is pure Python (sorted list + index interpolation, same approach as `_interpolate_pct` in `enricher.py`). No numpy dependency.
 
 **Extended existing function:**
 ```python
 def count_hero_matches(account_id: int, hero: str, turbo: bool | None = None) -> int:
 ```
-When `turbo` is not None, adds `AND json_extract(report_json, '$.turbo') = ?` to the query.
+When `turbo` is not None, adds `AND json_extract(report_json, '$.turbo') = ?` to the query. Progress indicator uses `turbo=False`.
 
 ---
 
@@ -100,32 +113,38 @@ In `enricher.enrich()`, after the OpenDota/STRATZ benchmark block:
 LOCAL_THRESHOLD = 30
 LOCAL_METRICS = ["gold_per_min", "xp_per_min", "last_hits_per_min"]
 
-local_benchmarks, sample_size = get_local_benchmarks(account_id, metrics.hero, LOCAL_METRICS)
-
-if sample_size < LOCAL_THRESHOLD:
-    local_benchmark_progress = LocalBenchmarkProgress(
-        hero=metrics.hero,
-        matches_stored=sample_size,
-        threshold=LOCAL_THRESHOLD,
-    )
-    local_benchmarks = []
+# Turbo matches skip local benchmark computation entirely
+if not metrics.turbo:
+    local_benchmarks, sample_size = get_local_benchmarks(account_id, metrics.hero, LOCAL_METRICS)
+    if sample_size < LOCAL_THRESHOLD:
+        local_benchmark_progress = LocalBenchmarkProgress(
+            hero=metrics.hero,
+            matches_stored=sample_size,
+            threshold=LOCAL_THRESHOLD,
+        )
+        local_benchmarks = []
+    else:
+        local_benchmark_progress = None
 else:
+    local_benchmarks = []
     local_benchmark_progress = None
 ```
 
-`enrich()` signature gains `account_id: int` parameter. The call site in `api.py` already has `account_id` available.
+`enrich()` signature gains `account_id: int` parameter. **Both** call sites must be updated: the existing `/analyze` endpoint in `api.py` and the new import pipeline in `importer.py`. The `account_id` is available at both sites.
 
-Turbo matches skip local benchmark computation entirely (no progress indicator, no local percentiles — Turbo accumulation is a separate issue, dota-analysis-ofa).
+`get_local_benchmarks()` is a synchronous SQLite call invoked from the async `enrich()`. This follows the same accepted pattern as existing `history.py` functions (`save_match_report`, etc.) which are also called from async paths without `asyncio.to_thread`. The DB operations are fast enough for local SQLite that this is not a concern in practice.
+
+Turbo accumulation is a separate issue (dota-analysis-ofa) — no local benchmarks or progress indicator for Turbo matches.
 
 ---
 
 ## Section 5: Detection + LLM Integration
 
 **Detector (`detector.py`):**
-When `local_benchmarks` is non-empty, evaluate each metric against both OpenDota and local thresholds independently. A metric fires an error if *either* source puts it below threshold. The `DetectedError.context` field includes both:
+When both OpenDota and local benchmarks are present for the same metric, produce a single merged `DetectedError` — not two separate errors. The rule fires if *either* source puts the metric below threshold. The merged `DetectedError.context` field carries both percentiles:
 > `"43rd pct globally / 28th pct in your 45-game sample"`
 
-No change to existing threshold logic or rule structure.
+When only one source is available (below threshold or metric absent in one source), the existing single-source error fires unchanged.
 
 **LLM prompt (`prompt.py`):**
 When local benchmarks are present, append a local benchmark block alongside the existing OpenDota block:
@@ -167,10 +186,10 @@ GPM  ████████░░  43rd pct (global)  |  61st pct (your 45 gam
 | `dota_coach/history.py` | Add `get_local_benchmarks()`; extend `count_hero_matches(turbo=)` |
 | `dota_coach/importer.py` | New module — `import_match_metrics()` |
 | `dota_coach/enricher.py` | Call local benchmarks; add `account_id` param to `enrich()` |
-| `dota_coach/detector.py` | Integrate local benchmarks into error detection |
+| `dota_coach/detector.py` | Integrate local benchmarks into merged error detection |
 | `dota_coach/prompt.py` | Local benchmark block in LLM context |
-| `dota_coach/api.py` | `POST /import-history/{account_id}` endpoint; pass `account_id` to `enrich()` |
-| `dota_coach/cli.py` | `import-history` command |
+| `dota_coach/api.py` | `POST /import-history/{account_id}` endpoint; update **existing** `enrich()` call to pass `account_id` |
+| `dota_coach/cli.py` | New file — `import-history` CLI command; register in `pyproject.toml` |
 | `static/` | Progress indicator, side-by-side bars, `metrics_only` UI state |
 
 ---
