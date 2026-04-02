@@ -358,6 +358,45 @@ class TestDiscoverLaneHeroes:
         assert m.lane_enemies == []
         assert m.lane_allies == []
 
+    def test_stratz_positions_fallback_when_lane_is_none(self):
+        """When OpenDota lane is None, Stratz positions are used to infer lanes."""
+        heroes = _make_heroes_data((1, "Anti-Mage"), (2, "Crystal Maiden"), (3, "Axe"), (4, "Pudge"))
+        match = {
+            "match_id": 1,
+            "players": [
+                {"account_id": 100, "isRadiant": True, "hero_id": 1},   # no lane field
+                {"account_id": 101, "isRadiant": True, "hero_id": 2},   # no lane field
+                {"account_id": 200, "isRadiant": False, "hero_id": 3},  # no lane field
+                {"account_id": 201, "isRadiant": False, "hero_id": 4},
+            ],
+        }
+        stratz_positions = {
+            100: 1,  # carry → lane 1 (safe)
+            101: 5,  # hard support → lane 1 (with carry)
+            200: 3,  # offlane → lane 3 (opposing safe)
+            201: 4,  # soft support → lane 3 (with offlaner)
+        }
+        m = _blank_metrics()
+        _discover_lane_heroes(m, 100, match, heroes, stratz_positions=stratz_positions)
+        assert m.lane_allies == ["Crystal Maiden"]
+        assert set(m.lane_enemies) == {"Axe", "Pudge"}
+
+    def test_stratz_positions_mid_mirror(self):
+        """Stratz positions correctly identify mid mirror matchup."""
+        heroes = _make_heroes_data((9, "Mirana"), (10, "Shadow Fiend"))
+        match = {
+            "match_id": 1,
+            "players": [
+                {"account_id": 100, "isRadiant": True, "hero_id": 10},
+                {"account_id": 200, "isRadiant": False, "hero_id": 9},
+            ],
+        }
+        stratz_positions = {100: 2, 200: 2}  # both mid
+        m = _blank_metrics()
+        _discover_lane_heroes(m, 100, match, heroes, stratz_positions=stratz_positions)
+        assert m.lane_enemies == ["Mirana"]
+        assert m.lane_allies == []
+
     def test_does_not_overwrite_existing_lane_data(self):
         """enrich_lane_matchup skips discovery when lane_enemies already set."""
         # Test the guard in enrich_lane_matchup, not _discover_lane_heroes directly
