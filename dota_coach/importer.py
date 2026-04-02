@@ -61,22 +61,35 @@ async def _call_with_backoff(coro, match_id: int | None = None, attempt: int = 0
         raise
 
 
-async def import_match_metrics(account_id: int, limit: int = 50) -> dict:
+async def import_match_metrics(account_id: int, limit: int = 50, offset: int = 0) -> dict:
     """Fetch up to `limit` recent matches for `account_id`, extract metrics, save to DB.
+
+    Args:
+        account_id: OpenDota account ID (Steam3 format)
+        limit: Maximum number of matches to fetch per batch (default 50)
+        offset: Skip first N matches for pagination (0=newest, 150=next batch, etc.)
 
     Rate limiting: enforces 1-second delays between API calls to stay under OpenDota's
     60 req/minute free tier limit. Retries with exponential backoff on 429 errors.
 
     Returns:
         {"imported": int, "skipped": int, "failed": int}
+
+    Example:
+        # Batch 1: newest 150 matches
+        await import_match_metrics(123, limit=150, offset=0)
+        # Batch 2: next 150 older matches
+        await import_match_metrics(123, limit=150, offset=150)
+        # Batch 3: next 150 older matches
+        await import_match_metrics(123, limit=150, offset=300)
     """
     imported = skipped = failed = 0
 
-    # Fetch recent match list from OpenDota
+    # Fetch match list from OpenDota with pagination
     try:
-        matches = await get_paginated_matches(account_id, limit=limit)
+        matches = await get_paginated_matches(account_id, limit=limit, offset=offset)
     except Exception as exc:
-        logger.error("Failed to fetch match list for account %s: %s", account_id, exc)
+        logger.error("Failed to fetch match list for account %s (offset %d): %s", account_id, offset, exc)
         return {"imported": 0, "skipped": 0, "failed": 0}
 
     # Skip matches already stored
