@@ -423,13 +423,40 @@ function renderReport(d) {
   if (d.turbo) {
     bch.innerHTML = '<div class="turbo-notice">&#9889; Turbo mode &mdash; percentile benchmarks not available for this game mode.<br><span style="color:var(--text-muted);font-size:13px">Coaching is based on absolute metrics and Turbo-specific reference values.</span></div>';
   } else if (d.benchmarks && d.benchmarks.length) {
+    // Build a lookup for local benchmarks by metric name
+    const localByMetric = {};
+    (d.local_benchmarks || []).forEach(lb => { localByMetric[lb.metric] = lb; });
+
     bch.innerHTML = d.benchmarks.map(b => {
-      const pct = Math.round(b.player_pct * 100);
+      const globalPct = Math.round(b.player_pct * 100);
+      const local = localByMetric[b.metric];
+      const localPct = local ? Math.round(local.player_pct * 100) : null;
+
+      const localBar = local
+        ? `<div class="bench-bar bench-bar-local">
+             <div class="bench-fill bench-fill-local" style="width:${localPct}%"></div>
+           </div>
+           <span class="bench-local-label">${localPct}% (your ${local.sample_size} games)</span>`
+        : '';
+
       return `<div class="bench-row">
-        <div class="bench-label"><span>${fmtBenchName(b.metric)}</span><span>${pct}%</span></div>
-        <div class="bench-bar"><div class="bench-fill" style="width:${pct}%"></div></div>
+        <div class="bench-label">
+          <span>${fmtBenchName(b.metric)}</span>
+          <span>${globalPct}% global</span>
+        </div>
+        <div class="bench-bar"><div class="bench-fill" style="width:${globalPct}%"></div></div>
+        ${localBar}
       </div>`;
     }).join('');
+
+    // Progress note: show if local_benchmark_progress is set (below threshold)
+    if (d.local_benchmark_progress) {
+      const prog = d.local_benchmark_progress;
+      const note = document.createElement('div');
+      note.className = 'local-bench-note';
+      note.textContent = `Local benchmarks: ${prog.matches_stored}/${prog.threshold} ${prog.hero} games stored — building your personal baseline`;
+      bch.appendChild(note);
+    }
   } else {
     bch.innerHTML = '<p style="color:var(--text-muted)">No benchmark data</p>';
   }
@@ -757,6 +784,8 @@ function buildMatchRow(m) {
   const gt       = gameTypeLabel(m.lobby_type ?? 0, m.game_mode ?? 0);
   const metaLine = `${date} · ${duration}${gt ? ' · ' + gt : ''}`;
 
+  const metricsOnly = m.metrics_only === true;
+
   const row = document.createElement('div');
   row.className = `sidebar-row ${stateClass}${expired ? ' sidebar-expired' : ''}`;
   row.dataset.matchId       = m.match_id;
@@ -772,6 +801,7 @@ function buildMatchRow(m) {
     </div>
     <div class="sidebar-badge-wrap">
       <span class="sidebar-badge ${m.won ? 'badge-win' : 'badge-loss'}">${m.won ? 'W' : 'L'}</span>
+      ${metricsOnly ? '<span class="badge-metrics-only" title="Imported for benchmarks — no coaching report">metrics</span>' : ''}
       ${!expired ? `<button class="sidebar-action" style="display:none">${analyzed ? 'Re-analyze' : 'Analyze'}</button>` : ''}
     </div>
     <span class="sidebar-dot"></span>
@@ -789,6 +819,9 @@ function buildMatchRow(m) {
   if (analyzed && !expired) {
     row.addEventListener('click', async function(e) {
       if (e.target.classList.contains('sidebar-action')) return;
+      if (metricsOnly) {
+        return; // no coaching report to display
+      }
       const pid      = localStorage.getItem('dota_coach_account_id') || lastPlayerId || '';
       const cacheKey = `dota_analysis_${m.match_id}_${pid}`;
       const cached   = localStorage.getItem(cacheKey);

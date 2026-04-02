@@ -290,3 +290,41 @@ a { color: var(--accent-blue); }
   .sidebar.open { transform: translateX(0); }
   .hamburger { display: block; }
 }
+
+/* ── Local benchmark secondary bar ───────────────────────────────── */
+.bench-bar-local {
+  height: 4px;
+  background: var(--bg-card);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.bench-fill-local {
+  background: var(--accent-secondary, #6c8ebf);
+  height: 100%;
+  border-radius: 2px;
+}
+.bench-local-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Local benchmark progress note ──────────────────────────────── */
+.local-bench-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  font-style: italic;
+}
+
+/* ── Metrics-only badge in sidebar ──────────────────────────────── */
+.badge-metrics-only {
+  font-size: 10px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
