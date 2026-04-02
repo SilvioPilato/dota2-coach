@@ -477,7 +477,66 @@ function renderReport(d) {
   // Timeline
   renderTimeline(d.timeline || '');
 
+  // Lane matchup
+  const laneHtml = renderLaneMatchup(d);
+  if (laneHtml) {
+    const metricCardsDiv = document.querySelector('#metricCards');
+    if (metricCardsDiv) {
+      metricCardsDiv.insertAdjacentHTML('afterend', laneHtml);
+    }
+  }
+
   document.getElementById('report').classList.add('visible');
+}
+
+function renderLaneMatchup(metrics) {
+  // Render hero chip lineup for lane matchup with icons.
+  if (!metrics.lane_enemies || metrics.lane_enemies.length === 0) {
+    return '';  // Hide section if no enemies
+  }
+
+  const icons = metrics.lane_hero_icons || {};
+
+  // Build ally chips
+  const allyChips = (metrics.lane_allies || []).map(ally => {
+    const synergy = metrics.lane_ally_synergy_scores?.[ally];
+    let chipClass = 'chip-synergy-neutral';
+    if (synergy !== undefined && synergy !== null) {
+      if (synergy > 3) chipClass = 'chip-synergy-good';
+      else if (synergy < -3) chipClass = 'chip-synergy-bad';
+    }
+
+    const icon = icons[ally] ? `<img class="chip-icon" src="${icons[ally]}" alt="${ally}">` : '';
+    const score = synergy !== undefined ? ` ${synergy > 0 ? '+' : ''}${synergy.toFixed(1)}` : '';
+    return `<span class="hero-chip ${chipClass}">${icon}${ally}${score}</span>`;
+  }).join('');
+
+  // Add self hero (player's own hero)
+  const selfIcon = icons[metrics.hero] ? `<img class="chip-icon" src="${icons[metrics.hero]}" alt="${metrics.hero}">` : '';
+  const selfChip = `<span class="hero-chip chip-self">${selfIcon}${metrics.hero}</span>`;
+  const alliesHtml = selfChip + allyChips;
+
+  // Build enemy chips
+  const enemyChips = metrics.lane_enemies.map(enemy => {
+    const wr = metrics.lane_matchup_winrates?.[enemy];
+    let chipClass = 'chip-wr-neutral';
+    if (wr !== undefined && wr !== null) {
+      if (wr > 53) chipClass = 'chip-wr-good';  // Good for us (they have high WR, so we're at disadvantage, chip shows green)
+      else if (wr < 47) chipClass = 'chip-wr-bad';  // Bad for us
+    }
+
+    const icon = icons[enemy] ? `<img class="chip-icon" src="${icons[enemy]}" alt="${enemy}">` : '';
+    const wrText = wr !== undefined ? ` ${Math.round(wr)}%` : '';
+    return `<span class="hero-chip ${chipClass}">${icon}${enemy}${wrText}</span>`;
+  }).join('');
+
+  return `
+    <div class="lane-matchup" id="laneMatchup">
+      <div class="lane-side lane-allies">${alliesHtml}</div>
+      <div class="lane-vs">vs</div>
+      <div class="lane-side lane-enemies">${enemyChips}</div>
+    </div>
+  `;
 }
 
 function renderTimeline(timelineStr) {

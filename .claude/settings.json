@@ -93,13 +93,46 @@
       "Bash(git -C /c/Users/Silvio/Dev/dota-analysis diff --stat HEAD)",
       "Bash(git -C /c/Users/Silvio/Dev/dota-analysis status)",
       "Bash(git -C /c/Users/Silvio/Dev/dota-analysis add dota_coach/prompt.py tests/test_prompt.py)",
-      "Bash(git -C:*)"
+      "Bash(git -C:*)",
+      "Bash(bd memories:*)",
+      "Bash(ls static/*.js static/*.html static/*.css)",
+      "Bash(grep -n \"local.*benchmark\\\\|benchmark.*local\\\\|percentile\\\\|p25\\\\|p75\\\\|median\" docs/superpowers/PRDs/*.md)",
+      "Bash(grep -n \"local\\\\|benchmark\\\\|Turbo\\\\|percentile\" docs/superpowers/PRDs/*.md)",
+      "Bash(grep -n \"benchmark\\\\|percentile\\\\|local_bench\\\\|metrics_only\" c:/Users/Silvio/Dev/dota-analysis/static/*.js c:/Users/Silvio/Dev/dota-analysis/static/*.html)",
+      "Read(//c/Users/Silvio/.config/superpowers/worktrees/dota-analysis/v3-local-benchmarks/**)",
+      "Bash(python -m pytest tests/test_history.py::TestCountHeroMatchesTurboFilter -v)",
+      "Bash(python -m pytest tests/test_history.py::TestGetLocalBenchmarks -v)",
+      "Bash(python -c ':*)",
+      "Bash(python -m pytest tests/test_enricher.py::test_enrich_accepts_account_id_param -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python -m pytest tests/test_detector.py::TestLocalBenchmarkDetection -v)",
+      "Bash(python -m pytest tests/test_detector.py -q)",
+      "Bash(python -m pytest tests/test_prompt.py::TestLocalBenchmarkPrompt -v)",
+      "Bash(python -m pytest tests/test_importer.py -v)",
+      "Bash(python -m dota_coach.cli --help)",
+      "WebFetch(domain:docs.opendota.com)",
+      "WebSearch",
+      "WebFetch(domain:www.opendota.com)",
+      "WebFetch(domain:blog.opendota.com)",
+      "Bash(python -m pytest tests/test_importer.py -xvs)",
+      "Bash(python -c \"from dota_coach.models import MatchMetrics; m = MatchMetrics\\(match_id=1, hero='Anti-Mage', duration_minutes=30, result='win', lh_at_10=50, denies_at_10=0, deaths_before_10=0, death_timestamps_laning=[], net_worth_at_10=1000, net_worth_at_20=2000, opponent_net_worth_at_10=900, opponent_net_worth_at_20=1800, gpm=400, xpm=350, laning_heatmap_own_half_pct=0.8, ward_purchases=2\\); print\\('lane_hero_icons field exists:', hasattr\\(m, 'lane_hero_icons'\\)\\); print\\('lane_hero_icons value:', m.lane_hero_icons\\); print\\('lane_hero_icons type:', type\\(m.lane_hero_icons\\)\\)\")",
+      "Bash(python -c \"from dota_coach.models import MatchMetrics; m = MatchMetrics\\(match_id=1, hero='Anti-Mage', duration_minutes=30, result='win', lh_at_10=50, denies_at_10=0, deaths_before_10=0, death_timestamps_laning=[], net_worth_at_10=1000, net_worth_at_20=2000, opponent_net_worth_at_10=900, opponent_net_worth_at_20=1800, gpm=400, xpm=350, total_last_hits=200, first_core_item_minute=15.5, first_core_item_name='Battle Fury', laning_heatmap_own_half_pct=0.8, ward_purchases=2, teamfight_participation_rate=0.75, teamfight_avg_damage_contribution=1500, first_roshan_minute=20.0, first_tower_minute=25.0\\); print\\('lane_hero_icons field exists:', hasattr\\(m, 'lane_hero_icons'\\)\\); print\\('lane_hero_icons value:', m.lane_hero_icons\\); print\\('lane_hero_icons type:', type\\(m.lane_hero_icons\\)\\)\")",
+      "Bash(python -m pytest tests/test_prompt.py::test_lane_line_returns_none_when_no_enemies -xvs)",
+      "Bash(python -m pytest tests/test_prompt.py -xvs)",
+      "Bash(python -m pytest tests/test_prompt.py -v --tb=short)",
+      "Bash(python -m pytest tests/test_prompt.py::TestLaningPhaseBlock -xvs)",
+      "Bash(python -m pytest tests/test_prompt.py -x)",
+      "Bash(node -c static/index.html)",
+      "Bash(python -m pytest tests/ -q --tb=short)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat\\dota_coach",
       "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat\\tests",
       "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat\\static",
-      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat"
+      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-sidebar-chat",
+      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-local-benchmarks\\dota_coach",
+      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-local-benchmarks\\tests",
+      "C:\\Users\\Silvio\\.config\\superpowers\\worktrees\\dota-analysis\\v3-local-benchmarks"
     ]
   }
 }

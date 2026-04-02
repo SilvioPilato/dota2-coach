@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Optional
+from typing import Any, Optional
 
 from dota_coach import config
 from dota_coach.models import ChatRequest, DeathEvent, DetectedError, EnrichmentContext, HeroBenchmark, MatchMetrics
@@ -112,8 +112,107 @@ def build_system_prompt(role: int = 1, turbo: bool = False) -> str:
     )
 
 
+def _laning_phase_block(metrics: Any, enrichment: EnrichmentContext | None) -> str | None:
+    """Build detailed laning phase context block for LLM.
+
+    Returns None if no lane enemies (preserves skip behavior).
+
+    Output format:
+    ```
+    LANING PHASE:
+    - Lineup: {allies_with_synergy} vs {enemies_with_wr}
+    - Avg matchup WR: 48% — slight disadvantage
+    - Synergy: good (+4.2 avg)
+    - Lane outcome: NW delta −320g at 10 min — underperformed despite favorable matchup
+    ```
+    """
+    if not metrics.lane_enemies:
+        return None
+
+    # Lineup line (same as existing _lane_line logic)
+    ally_strs = []
+    for ally in (metrics.lane_allies or []):
+        synergy = None
+        if metrics.lane_ally_synergy_scores:
+            synergy = metrics.lane_ally_synergy_scores.get(ally)
+        if synergy is not None:
+            ally_strs.append(f"{ally} (synergy {synergy:+.1f})")
+        else:
+            ally_strs.append(ally)
+
+    enemy_strs = []
+    for enemy in metrics.lane_enemies:
+        wr = None
+        if metrics.lane_matchup_winrates:
+            wr = metrics.lane_matchup_winrates.get(enemy)
+        if wr is not None:
+            enemy_strs.append(f"{enemy} ({int(wr * 100)}% WR)")
+        else:
+            enemy_strs.append(enemy)
+
+    if metrics.lane_allies:
+        lineup = f"{metrics.hero} + {' + '.join(ally_strs)} vs {' + '.join(enemy_strs)}"
+    else:
+        lineup = f"{metrics.hero} vs {' + '.join(enemy_strs)}"
+
+    lines = [
+        "LANING PHASE:",
+        f"- Lineup: {lineup}",
+    ]
+
+    # Avg matchup WR label
+    if metrics.lane_matchup_winrates:
+        wrs = [wr for wr in metrics.lane_matchup_winrates.values() if wr is not None]
+        if wrs:
+            avg_wr = sum(wrs) / len(wrs)
+            if avg_wr < 0.47:
+                wr_label = "slight disadvantage"
+            elif avg_wr > 0.53:
+                wr_label = "favorable matchup"
+            else:
+                wr_label = "even matchup"
+            lines.append(f"- Avg matchup WR: {avg_wr * 100:.0f}% — {wr_label}")
+
+    # Synergy label
+    if metrics.lane_ally_synergy_scores:
+        synergies = [s for s in metrics.lane_ally_synergy_scores.values() if s is not None]
+        if synergies:
+            avg_synergy = sum(synergies) / len(synergies)
+            if avg_synergy > 3:
+                synergy_label = "good"
+                lines.append(f"- Synergy: {synergy_label} ({avg_synergy:+.1f} avg)")
+            elif avg_synergy < -3:
+                synergy_label = "weak"
+                lines.append(f"- Synergy: {synergy_label} ({avg_synergy:+.1f} avg)")
+
+    # Lane outcome framing (requires NW at 10)
+    if metrics.net_worth_at_10 and metrics.opponent_net_worth_at_10:
+        nw_delta = metrics.net_worth_at_10 - metrics.opponent_net_worth_at_10
+
+        # Determine framing based on WR + delta
+        outcome_frame = None
+        if metrics.lane_matchup_winrates:
+            wrs = [wr for wr in metrics.lane_matchup_winrates.values() if wr is not None]
+            if wrs:
+                avg_wr = sum(wrs) / len(wrs)
+                if avg_wr < 0.47:
+                    outcome_frame = "expected given unfavorable matchup" if nw_delta < 0 else "outperformed a tough matchup"
+                elif avg_wr > 0.53:
+                    outcome_frame = "underperformed despite favorable matchup" if nw_delta < 0 else "expected given favorable matchup"
+
+        if outcome_frame:
+            lines.append(f"- Lane outcome: NW delta {nw_delta:+.0f}g at 10 min — {outcome_frame}")
+        else:
+            lines.append(f"- Lane outcome: NW delta {nw_delta:+.0f}g at 10 min")
+
+    return "\n".join(lines)
+
+
 def _lane_line(metrics) -> "str | None":
-    """Build the 'Lane: Hero + ally (synergy X) vs enemy (WR%)' line. Returns None if no lane_enemies."""
+    """Build the 'Lane: Hero + ally (synergy X) vs enemy (WR%)' line. Returns None if no lane_enemies.
+
+    DEPRECATED: Use _laning_phase_block() instead. Kept for backward compatibility with tests.
+    """
     if not metrics.lane_enemies:
         return None
 
@@ -193,7 +292,7 @@ def build_user_message(
 
     # --- Role-specific PERFORMANCE block ---
     lines.append("PERFORMANCE (percentiles are global, all brackets, this hero):")
-    lane = _lane_line(metrics)
+    lane = _laning_phase_block(metrics, enrichment)
     if lane:
         lines.append(lane)
 
@@ -356,7 +455,7 @@ def _build_chat_system_prompt(ctx: "MatchReport") -> str:
     lines.append("MATCH METRICS:")
     lines.append(f"Hero: {m.hero} | Role: pos {ctx.role} ({role_label}) | Result: {m.result.upper()} | Duration: {m.duration_minutes:.0f} min")
     lines.append(f"GPM: {m.gpm} | XPM: {m.xpm} | LH@10: {m.lh_at_10} | Denies@10: {m.denies_at_10}")
-    lane = _lane_line(m)
+    lane = _laning_phase_block(m, None)
     if lane:
         lines.append(lane)
     if m.death_events:

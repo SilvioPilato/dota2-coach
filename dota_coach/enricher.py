@@ -436,6 +436,24 @@ async def enrich_lane_matchup(
             id_to_name[hid]: s for hid, s in syn_score_by_id.items() if hid in id_to_name
         }
 
+    # Populate hero icon URLs from heroes_data
+    lane_hero_icons = {}
+
+    # All heroes that appear in the lane
+    all_lane_heroes = (metrics.lane_allies or []) + (metrics.lane_enemies or []) + [metrics.hero]
+
+    for hero_name in all_lane_heroes:
+        if not hero_name or hero_name not in heroes_data:
+            continue
+        icon_path = heroes_data[hero_name].get("icon", "")
+        if icon_path:
+            # Remove trailing "?" from path
+            icon_path_clean = icon_path.rstrip("?")
+            # Build CDN URL
+            lane_hero_icons[hero_name] = f"https://cdn.cloudflare.steamstatic.com{icon_path_clean}"
+
+    metrics.lane_hero_icons = lane_hero_icons
+
 
 async def enrich(
     metrics: Any,

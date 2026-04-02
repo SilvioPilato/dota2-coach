@@ -5,7 +5,7 @@ from dota_coach.enricher import _discover_lane_heroes, enrich_lane_matchup, _get
 from dota_coach.extractor import extract_metrics_from_opendota
 from dota_coach.stratz import rank_tier_to_stratz_bracket
 
-MATCH_ID = 8751149025
+MATCH_ID = 8751132385
 STEAM_ID = 76561198095469286
 ACCOUNT_ID = STEAM_ID - 76561197960265728
 
@@ -13,6 +13,11 @@ async def main():
     print("Fetching match data...")
     match_meta = await get_match(MATCH_ID)
     heroes_data = await _get_heroes_data()
+
+    print("All players:")
+    for p in match_meta["players"]:
+        print(f"  hero_id={p.get('hero_id')} lane={p.get('lane')} isRadiant={p.get('isRadiant')}")
+    print()
 
     metrics = extract_metrics_from_opendota(ACCOUNT_ID, match_meta)
     print(f"Hero: {metrics.hero}")

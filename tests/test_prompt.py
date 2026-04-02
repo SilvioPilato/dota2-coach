@@ -351,16 +351,17 @@ def test_lane_line_multiple_enemies_no_ally():
 def test_user_message_shows_lane_line_when_enemies_present():
     m = _make_metrics(hero="Anti-Mage", lane_enemies=["Axe", "Crystal Maiden"], lane_allies=["Io"])
     msg = build_user_message(m, [], role=1)
-    assert "- Lane: Anti-Mage + Io vs Axe + Crystal Maiden" in msg
+    assert "LANING PHASE:" in msg
+    assert "- Lineup: Anti-Mage + Io vs Axe + Crystal Maiden" in msg
 
 
 def test_user_message_lane_line_is_first_in_performance_block():
     m = _make_metrics(hero="Anti-Mage", lane_enemies=["Axe"], lane_allies=[])
     msg = build_user_message(m, [], role=1)
     perf_idx = msg.index("PERFORMANCE")
-    lane_idx = msg.index("- Lane:")
+    laning_idx = msg.index("LANING PHASE:")
     gpm_idx = msg.index("- GPM:")
-    assert perf_idx < lane_idx < gpm_idx
+    assert perf_idx < laning_idx < gpm_idx
 
 
 def test_user_message_no_lane_line_when_no_enemies():
@@ -370,11 +371,12 @@ def test_user_message_no_lane_line_when_no_enemies():
 
 
 def test_user_message_lane_line_all_roles():
-    """Lane line should appear for all roles when lane_enemies is set."""
+    """Laning phase block should appear for all roles when lane_enemies is set."""
     for role in (1, 2, 3, 4, 5):
         m = _make_metrics(hero="Lion", lane_enemies=["Axe"], lane_allies=[], ward_placements=5)
         msg = build_user_message(m, [], role=role)
-        assert "- Lane: Lion vs Axe" in msg, f"Lane line missing for role {role}"
+        assert "LANING PHASE:" in msg, f"LANING PHASE block missing for role {role}"
+        assert "- Lineup: Lion vs Axe" in msg, f"Lineup line missing for role {role}"
 
 
 def _make_match_report(metrics: MatchMetrics) -> "MatchReport":
@@ -394,7 +396,8 @@ def test_chat_system_prompt_includes_lane_line_when_enemies_present():
     m = _make_metrics(hero="Juggernaut", lane_enemies=["Axe", "Pudge"], lane_allies=["Lion"])
     report = _make_match_report(m)
     content = _build_chat_system_prompt(report)
-    assert "- Lane: Juggernaut + Lion vs Axe + Pudge" in content
+    assert "LANING PHASE:" in content
+    assert "- Lineup: Juggernaut + Lion vs Axe + Pudge" in content
 
 
 def test_chat_system_prompt_omits_lane_line_when_no_enemies():
@@ -497,8 +500,8 @@ def test_lane_line_wr_in_chat_system_prompt():
     )
     report = _make_match_report(m)
     content = _build_chat_system_prompt(report)
-    assert "Axe (48.2% WR)" in content
-    assert "Pudge (53.1% WR)" in content
+    assert "Axe (48% WR)" in content
+    assert "Pudge (53% WR)" in content
 
 
 # ---------------------------------------------------------------------------
@@ -687,3 +690,122 @@ class TestLocalBenchmarkPrompt:
         enr = EnrichmentContext(patch_name="7.37", benchmarks=[], item_costs={}, hero_base_stats={})
         msg = build_user_message(_make_metrics_for_prompt(), [], role=1, enrichment=enr)
         assert "LOCAL BENCHMARKS" not in msg
+
+
+class TestLaningPhaseBlock:
+    """Tests for _laning_phase_block() laning phase context helper."""
+
+    def _base_metrics(self):
+        """Basic MatchMetrics with lane data."""
+        from dota_coach.models import MatchMetrics
+        return MatchMetrics(
+            match_id=1, hero="Anti-Mage", duration_minutes=35.0,
+            result="loss", lh_at_10=60, denies_at_10=5, deaths_before_10=0,
+            death_timestamps_laning=[], net_worth_at_10=8000, net_worth_at_20=16000,
+            opponent_net_worth_at_10=7500, opponent_net_worth_at_20=15000,
+            gpm=480, xpm=600, total_last_hits=200,
+            first_core_item_minute=None, first_core_item_name=None,
+            laning_heatmap_own_half_pct=0.4, ward_purchases=0,
+            teamfight_participation_rate=0.6, teamfight_avg_damage_contribution=None,
+            first_roshan_minute=None, first_tower_minute=None, turbo=False,
+        )
+
+    def test_no_enemies_returns_none(self):
+        """_laning_phase_block() returns None when lane_enemies is empty."""
+        from dota_coach.prompt import _laning_phase_block
+        metrics = self._base_metrics()
+        metrics.lane_enemies = []
+        block = _laning_phase_block(metrics, None)
+        assert block is None
+
+    def test_full_block_with_wr_and_synergy(self):
+        """Full block rendered with WR + synergy data."""
+        from dota_coach.prompt import _laning_phase_block
+        metrics = self._base_metrics()
+        metrics.lane_allies = ["Crystal Maiden"]
+        metrics.lane_enemies = ["Bristleback", "Lion"]
+        metrics.lane_ally_synergy_scores = {"Crystal Maiden": 4.2}
+        metrics.lane_matchup_winrates = {"Bristleback": 0.44, "Lion": 0.51}
+
+        block = _laning_phase_block(metrics, None)
+
+        assert block is not None
+        assert "LANING PHASE:" in block
+        assert "- Lineup:" in block
+        assert "Crystal Maiden (synergy +4.2)" in block
+        assert "Bristleback (44% WR)" in block
+        assert "Lion (51% WR)" in block
+        assert "- Avg matchup WR:" in block
+        assert "even matchup" in block  # avg 47.5% → even
+
+    def test_block_without_wr_data(self):
+        """Block rendered without WR label when WR data absent."""
+        from dota_coach.prompt import _laning_phase_block
+        metrics = self._base_metrics()
+        metrics.lane_allies = ["Crystal Maiden"]
+        metrics.lane_enemies = ["Bristleback"]
+        metrics.lane_ally_synergy_scores = {"Crystal Maiden": 4.2}
+        metrics.lane_matchup_winrates = {}  # No WR data
+
+        block = _laning_phase_block(metrics, None)
+
+        assert block is not None
+        assert "LANING PHASE:" in block
+        assert "- Lineup:" in block
+        assert "- Avg matchup WR:" not in block  # Should not appear without WR data
+
+    def test_unfavorable_negative_delta_expected(self):
+        """Unfavorable matchup + negative NW delta → 'expected given unfavorable'."""
+        from dota_coach.prompt import _laning_phase_block
+        metrics = self._base_metrics()
+        metrics.net_worth_at_10 = 7000  # negative delta
+        metrics.opponent_net_worth_at_10 = 8000
+        metrics.lane_allies = ["Crystal Maiden"]
+        metrics.lane_enemies = ["Bristleback", "Lion"]
+        metrics.lane_matchup_winrates = {"Bristleback": 0.40, "Lion": 0.45}  # avg 42.5 < 47%
+
+        block = _laning_phase_block(metrics, None)
+
+        assert "expected given unfavorable matchup" in block
+
+    def test_unfavorable_positive_delta_outperformed(self):
+        """Unfavorable matchup + positive NW delta → 'outperformed a tough matchup'."""
+        from dota_coach.prompt import _laning_phase_block
+        metrics = self._base_metrics()
+        metrics.net_worth_at_10 = 9000  # positive delta
+        metrics.opponent_net_worth_at_10 = 8000
+        metrics.lane_allies = ["Crystal Maiden"]
+        metrics.lane_enemies = ["Bristleback", "Lion"]
+        metrics.lane_matchup_winrates = {"Bristleback": 0.40, "Lion": 0.45}  # avg 42.5 < 47%
+
+        block = _laning_phase_block(metrics, None)
+
+        assert "outperformed a tough matchup" in block
+
+    def test_favorable_negative_delta_underperformed(self):
+        """Favorable matchup + negative NW delta → 'underperformed despite favorable'."""
+        from dota_coach.prompt import _laning_phase_block
+        metrics = self._base_metrics()
+        metrics.net_worth_at_10 = 7000  # negative delta
+        metrics.opponent_net_worth_at_10 = 8000
+        metrics.lane_allies = ["Crystal Maiden"]
+        metrics.lane_enemies = ["Bristleback", "Lion"]
+        metrics.lane_matchup_winrates = {"Bristleback": 0.55, "Lion": 0.58}  # avg 56.5 > 53%
+
+        block = _laning_phase_block(metrics, None)
+
+        assert "underperformed despite favorable matchup" in block
+
+    def test_favorable_positive_delta_expected(self):
+        """Favorable matchup + positive NW delta → 'expected given favorable'."""
+        from dota_coach.prompt import _laning_phase_block
+        metrics = self._base_metrics()
+        metrics.net_worth_at_10 = 9000  # positive delta
+        metrics.opponent_net_worth_at_10 = 8000
+        metrics.lane_allies = ["Crystal Maiden"]
+        metrics.lane_enemies = ["Bristleback", "Lion"]
+        metrics.lane_matchup_winrates = {"Bristleback": 0.55, "Lion": 0.58}  # avg 56.5 > 53%
+
+        block = _laning_phase_block(metrics, None)
+
+        assert "expected given favorable matchup" in block
