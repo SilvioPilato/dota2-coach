@@ -9,6 +9,7 @@ from dota_coach.models import (
     DetectedError,
     EnrichmentContext,
     HeroBenchmark,
+    LocalBenchmark,
     MatchMetrics,
     RoleProfile,
 )
@@ -318,29 +319,63 @@ def detect_errors(
     # ===================================================================
     if enrichment is not None and role_profile is not None and not metrics.turbo:
         observed = role_profile.observed_metrics
-        benchmarks = enrichment.benchmarks
+        global_benchmarks = enrichment.benchmarks
+        local_benchmarks = getattr(enrichment, "local_benchmarks", [])
 
         for obs_metric in observed:
             bench_key = _METRIC_TO_BENCH.get(obs_metric)
             if bench_key is None:
-                continue  # no benchmark available for this metric
-            bench = _find_benchmark(benchmarks, bench_key)
-            if bench is None:
-                continue  # benchmarks didn't include this metric
+                continue
 
-            sev = _pct_severity(bench.player_pct)
+            global_bench = _find_benchmark(global_benchmarks, bench_key)
+            local_bench = next((b for b in local_benchmarks if b.metric == bench_key), None)
+
+            # Determine worst severity across available sources
+            global_sev = _pct_severity(global_bench.player_pct) if global_bench else None
+            local_sev  = _pct_severity(local_bench.player_pct)  if local_bench  else None
+
+            sev = None
+            if global_sev and local_sev:
+                # Both present — take the worse (lower index = worse)
+                sev = global_sev if _SEVERITY_ORDER[global_sev] <= _SEVERITY_ORDER[local_sev] else local_sev
+            elif global_sev:
+                sev = global_sev
+            elif local_sev:
+                sev = local_sev
+
             if sev is None:
-                continue  # above all thresholds — no error
+                continue  # both above all thresholds
 
             label = _METRIC_LABELS.get(bench_key, bench_key)
+
+            # Build context string combining available sources
+            context_parts = []
+            if global_bench:
+                context_parts.append(
+                    f"{global_bench.player_pct:.0%} pct globally (median {global_bench.bracket_avg:.0f} {label})"
+                )
+            if local_bench:
+                context_parts.append(
+                    f"{local_bench.player_pct:.0%} pct in your {local_bench.sample_size}-game sample"
+                )
+            context = " / ".join(context_parts) if context_parts else None
+
+            # Use the worst-source percentile for player_pct display
+            display_pct = min(
+                p for p in [
+                    global_bench.player_pct if global_bench else 1.0,
+                    local_bench.player_pct  if local_bench  else 1.0,
+                ]
+            )
+
             errors.append(DetectedError(
                 category=f"Low {label}",
-                description=f"{label} is in the {bench.player_pct:.0%} percentile globally for this hero",
+                description=f"{label} is below expectations",
                 severity=sev,
-                metric_value=f"{bench.player_value:.0f} {label}",
+                metric_value=f"{(global_bench or local_bench).player_value:.0f} {label}",
                 threshold=f"< {SEVERITY_THRESHOLDS[sev]:.0%} percentile",
-                player_pct=bench.player_pct,
-                context=f"global median: {bench.bracket_avg:.0f} {label}",
+                player_pct=display_pct,
+                context=context,
             ))
 
     # ===================================================================
