@@ -443,9 +443,14 @@ async def enrich_lane_matchup(
     all_lane_heroes = (metrics.lane_allies or []) + (metrics.lane_enemies or []) + [metrics.hero]
 
     for hero_name in all_lane_heroes:
-        if not hero_name or hero_name not in heroes_data:
+        if not hero_name:
             continue
-        icon_path = heroes_data[hero_name].get("icon", "")
+        # Resolve hero name to ID, then look up in heroes_data
+        hero_id = _find_hero_id(hero_name, heroes_data)
+        if hero_id is None or str(hero_id) not in heroes_data:
+            continue
+        hero_data = heroes_data[str(hero_id)]
+        icon_path = hero_data.get("icon", "")
         if icon_path:
             # Remove trailing "?" from path
             icon_path_clean = icon_path.rstrip("?")
