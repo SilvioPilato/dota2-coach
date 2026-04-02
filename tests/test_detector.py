@@ -581,7 +581,7 @@ class TestDetectErrorsItemTiming:
         assert all(e.category != "Slow item timing" for e in errors)
 
 
-from dota_coach.models import LocalBenchmark, LocalBenchmarkProgress
+from dota_coach.models import LocalBenchmark
 
 
 def _make_enrichment_with_local(global_pct: float, local_pct: float):
