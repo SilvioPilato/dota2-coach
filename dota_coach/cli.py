@@ -45,6 +45,31 @@ def analyze(
 
 
 @app.command()
+def import_history(
+    account_id: int = typer.Argument(..., help="OpenDota account ID (Steam3 format)"),
+    limit: int = typer.Option(50, help="Maximum number of recent matches to import"),
+) -> None:
+    """Import recent match metrics for ACCOUNT_ID without running LLM analysis.
+
+    Saves metrics_only MatchReport records to the history DB so that local
+    benchmark percentiles can be computed after 30+ matches per hero.
+    """
+    async def _run():
+        from dota_coach.importer import import_match_metrics
+        typer.echo(f"Importing up to {limit} matches for account {account_id}...")
+        result = await import_match_metrics(account_id, limit=limit)
+        typer.echo(
+            f"Done. Imported: {result['imported']}  "
+            f"Skipped: {result['skipped']}  "
+            f"Failed: {result['failed']}"
+        )
+
+    asyncio.run(_run())
+    # Note: asyncio.run() is correct here — the CLI is always a standalone
+    # process, never invoked from within a running FastAPI event loop.
+
+
+@app.command()
 def recent(
     player: str = typer.Argument(..., help="Steam ID (64-bit) or OpenDota account ID"),
 ) -> None:
