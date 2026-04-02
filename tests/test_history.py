@@ -11,6 +11,7 @@ import pytest
 
 from dota_coach.history import (
     get_analyzed_ids,
+    get_local_benchmarks,
     get_match_history,
     get_stored_report,
     save_match_report,
@@ -307,3 +308,154 @@ class TestCountHeroMatches:
 
         result = count_hero_matches(123, "Tidehunter")
         assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# Helpers for full-shape MatchReport JSON (needed for json_extract queries)
+# ---------------------------------------------------------------------------
+
+def _make_full_report(hero: str, gpm: int, xpm: int, total_lh: int,
+                      duration: float, turbo: bool = False) -> dict:
+    """Create a MatchReport-shaped dict that satisfies json_extract('$.metrics.*') queries."""
+    return {
+        "match_id": 999,
+        "hero": hero,
+        "turbo": turbo,
+        "metrics": {
+            "gpm": gpm,
+            "xpm": xpm,
+            "total_last_hits": total_lh,
+            "duration_minutes": duration,
+        },
+    }
+
+
+class TestCountHeroMatchesTurboFilter:
+    def test_turbo_false_excludes_turbo_matches(self, temp_db):
+        """turbo=False should only count non-turbo matches."""
+        r_normal = _make_full_report("Anti-Mage", 480, 600, 200, 35.0, turbo=False)
+        r_turbo  = _make_full_report("Anti-Mage", 700, 900, 300, 22.0, turbo=True)
+        save_match_report(100, 123, 1, r_normal)
+        save_match_report(101, 123, 1, r_turbo)
+
+        result = count_hero_matches(123, "Anti-Mage", turbo=False)
+        assert result == 1
+
+    def test_turbo_true_excludes_normal_matches(self, temp_db):
+        """turbo=True should only count turbo matches."""
+        r_normal = _make_full_report("Anti-Mage", 480, 600, 200, 35.0, turbo=False)
+        r_turbo  = _make_full_report("Anti-Mage", 700, 900, 300, 22.0, turbo=True)
+        save_match_report(100, 123, 1, r_normal)
+        save_match_report(101, 123, 1, r_turbo)
+
+        result = count_hero_matches(123, "Anti-Mage", turbo=True)
+        assert result == 1
+
+    def test_turbo_none_counts_all(self, temp_db):
+        """turbo=None (default) should count all matches regardless of game mode."""
+        r_normal = _make_full_report("Anti-Mage", 480, 600, 200, 35.0, turbo=False)
+        r_turbo  = _make_full_report("Anti-Mage", 700, 900, 300, 22.0, turbo=True)
+        save_match_report(100, 123, 1, r_normal)
+        save_match_report(101, 123, 1, r_turbo)
+
+        result = count_hero_matches(123, "Anti-Mage")
+        assert result == 2
+
+
+def _save_n_matches(db_fixture, hero: str, n: int, gpm: int = 480, xpm: int = 600,
+                    total_lh: int = 200, duration: float = 35.0, turbo: bool = False):
+    """Module-level helper: save n matches for hero (used by standalone tests)."""
+    base = sum(ord(c) for c in hero) * 1000 + (50000 if turbo else 0)
+    for i in range(n):
+        r = _make_full_report(hero, gpm + i, xpm + i, total_lh + i, duration, turbo=turbo)
+        save_match_report(base + i, 1, 1, r)
+
+
+class TestGetLocalBenchmarks:
+    def _save_n_matches(self, n: int, account_id: int, hero: str,
+                        gpm: int = 480, xpm: int = 600,
+                        total_lh: int = 200, duration: float = 35.0,
+                        turbo: bool = False, db_fixture=None):
+        """Helper: save n matches for hero.
+
+        Uses a deterministic match_id base derived from hero name and turbo flag
+        to avoid primary-key collisions between calls with different heroes or modes.
+        """
+        base = sum(ord(c) for c in hero) * 1000 + (50000 if turbo else 0)
+        for i in range(n):
+            r = _make_full_report(hero, gpm + i, xpm + i, total_lh + i, duration, turbo=turbo)
+            save_match_report(base + i, account_id, 1, r)
+
+    def test_below_threshold_returns_empty_list_and_count(self, temp_db):
+        """With < 30 matches, returns ([], count)."""
+        self._save_n_matches(12, 123, "Anti-Mage")
+
+        benchmarks, count = get_local_benchmarks(123, "Anti-Mage",
+                                                 ["gold_per_min", "xp_per_min"])
+        assert benchmarks == []
+        assert count == 12
+
+    def test_above_threshold_returns_benchmarks(self, temp_db):
+        """With >= 30 matches, returns populated LocalBenchmark list.
+
+        _save_n_matches saves gpm 480, 481, ..., 514 (35 values, incrementing).
+        Most recent match (first row DESC) has gpm=514 — the highest value —
+        so player_pct should be close to 1.0 (top of the sample).
+        """
+        self._save_n_matches(35, 123, "Anti-Mage", gpm=480)
+
+        benchmarks, count = get_local_benchmarks(123, "Anti-Mage", ["gold_per_min"])
+        assert count == 35
+        assert len(benchmarks) == 1
+        b = benchmarks[0]
+        assert b.metric == "gold_per_min"
+        assert b.sample_size == 35
+        assert b.p25 <= b.median <= b.p75
+        # Most recent match has gpm=514, the highest in sample → player_pct > 0.9
+        assert b.player_pct > 0.9
+
+    def test_excludes_turbo_matches(self, temp_db):
+        """Turbo matches are excluded even if hero matches."""
+        self._save_n_matches(20, 123, "Anti-Mage", turbo=False)
+        self._save_n_matches(20, 123, "Anti-Mage", turbo=True)
+
+        benchmarks, count = get_local_benchmarks(123, "Anti-Mage", ["gold_per_min"])
+        assert count == 20     # only non-turbo
+        assert benchmarks == []  # still below threshold
+
+    def test_last_hits_per_min_derived_correctly(self, temp_db):
+        """last_hits_per_min is derived from total_last_hits / duration_minutes."""
+        # 35 matches with known values: 210 LH / 35 min = 6.0 LH/min
+        for i in range(35):
+            r = _make_full_report("Anti-Mage", 480, 600, 210, 35.0, turbo=False)
+            save_match_report(2000 + i, 123, 1, r)
+
+        benchmarks, count = get_local_benchmarks(123, "Anti-Mage", ["last_hits_per_min"])
+        assert count == 35
+        assert len(benchmarks) == 1
+        b = benchmarks[0]
+        assert b.metric == "last_hits_per_min"
+        assert abs(b.median - 6.0) < 0.01   # all same value → median == 6.0
+
+    def test_hero_isolation(self, temp_db):
+        """Only matches for the requested hero are counted."""
+        self._save_n_matches(35, 123, "Anti-Mage")
+        self._save_n_matches(35, 123, "Juggernaut")
+
+        benchmarks_am, count_am = get_local_benchmarks(123, "Anti-Mage", ["gold_per_min"])
+        assert count_am == 35
+        benchmarks_jug, count_jug = get_local_benchmarks(123, "Juggernaut", ["gold_per_min"])
+        assert count_jug == 35
+
+    def test_empty_db_returns_zero_count(self, temp_db):
+        """No stored matches returns ([], 0)."""
+        benchmarks, count = get_local_benchmarks(999, "Anti-Mage", ["gold_per_min"])
+        assert benchmarks == []
+        assert count == 0
+
+    def test_unknown_metric_name_returns_empty_benchmarks(self, temp_db):
+        """Unknown metric names are silently skipped."""
+        _save_n_matches(temp_db, "Anti-Mage", n=35)
+        benchmarks, count = get_local_benchmarks(1, "Anti-Mage", ["invalid_metric"])
+        assert benchmarks == []
+        assert count == 35

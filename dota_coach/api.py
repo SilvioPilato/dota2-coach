@@ -286,7 +286,7 @@ async def analyze(req: AnalyzeRequest):
         _rank_tier: int = (_our_player_meta or {}).get("rank_tier") or 0
         _bracket = rank_tier_to_stratz_bracket(_rank_tier) if _rank_tier else "LEGEND_ANCIENT"
 
-        enrichment = await enrich(metrics, match_meta)
+        enrichment = await enrich(metrics, match_meta, account_id=account_id)
 
         # Enrich lane matchup data: enemy WRs + ally synergy (mutates metrics in place)
         from dota_coach.enricher import enrich_lane_matchup, _get_heroes_data
@@ -338,6 +338,8 @@ async def analyze(req: AnalyzeRequest):
             coaching_report=coaching_report,
             priority_focus=priority_focus,
             timeline=timeline,
+            local_benchmarks=enrichment.local_benchmarks,
+            local_benchmark_progress=enrichment.local_benchmark_progress,
         )
 
         report_dict = report.model_dump()
@@ -361,6 +363,28 @@ async def match_history(account_id: int, limit: int = 20):
     from dota_coach.history import get_match_history
     records = get_match_history(account_id, limit=limit)
     return JSONResponse(content=records)
+
+
+# ---------------------------------------------------------------------------
+# POST /import-history/{account_id}
+# ---------------------------------------------------------------------------
+
+@app.post("/import-history/{account_id}")
+async def import_history(account_id: int, limit: int = 50):
+    """Import recent matches for an account without running LLM analysis.
+
+    Fetches up to `limit` matches, extracts metrics, and saves them to the
+    history DB with metrics_only=True. Used to bootstrap local benchmark data.
+
+    Returns: {"imported": N, "skipped": M, "failed": K}
+    """
+    _STEAM64_BASE = 76561197960265728
+    if account_id > _STEAM64_BASE:
+        account_id = account_id - _STEAM64_BASE
+
+    from dota_coach.importer import import_match_metrics
+    result = await import_match_metrics(account_id, limit=limit)
+    return JSONResponse(content=result)
 
 
 @app.get("/report/{account_id}/{match_id}")

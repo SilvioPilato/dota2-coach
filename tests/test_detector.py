@@ -579,3 +579,74 @@ class TestDetectErrorsItemTiming:
             ),
         )
         assert all(e.category != "Slow item timing" for e in errors)
+
+
+from dota_coach.models import LocalBenchmark
+
+
+def _make_enrichment_with_local(global_pct: float, local_pct: float):
+    """Build an EnrichmentContext with one global and one local benchmark for gold_per_min."""
+    from dota_coach.models import EnrichmentContext, HeroBenchmark, LocalBenchmark
+    return EnrichmentContext(
+        patch_name="7.37",
+        benchmarks=[
+            HeroBenchmark(metric="gold_per_min", player_value=400.0,
+                          player_pct=global_pct, bracket_avg=480.0)
+        ],
+        item_costs={},
+        hero_base_stats={},
+        local_benchmarks=[
+            LocalBenchmark(metric="gold_per_min", player_value=400.0,
+                           player_pct=local_pct, p25=350.0, median=480.0,
+                           p75=560.0, sample_size=40)
+        ],
+    )
+
+
+class TestLocalBenchmarkDetection:
+    def _base_metrics(self):
+        from dota_coach.models import MatchMetrics
+        return MatchMetrics(
+            match_id=1, hero="Anti-Mage", duration_minutes=35.0, result="loss",
+            lh_at_10=60, denies_at_10=5, deaths_before_10=0,
+            death_timestamps_laning=[], net_worth_at_10=8000, net_worth_at_20=16000,
+            opponent_net_worth_at_10=7500, opponent_net_worth_at_20=15000,
+            gpm=400, xpm=550, total_last_hits=180,
+            first_core_item_minute=None, first_core_item_name=None,
+            laning_heatmap_own_half_pct=0.4, ward_purchases=0,
+            teamfight_participation_rate=0.6, teamfight_avg_damage_contribution=None,
+            first_roshan_minute=None, first_tower_minute=None, turbo=False,
+        )
+
+    def _base_role_profile(self):
+        from dota_coach.models import RoleProfile
+        return RoleProfile(
+            observed_metrics=["gpm"],
+            death_limit_before_10=2,
+            tf_participation_limit=0.4,
+            ward_rule="flag_if_laning_phase",
+        )
+
+    def test_both_sources_below_threshold_produces_single_merged_error(self):
+        """When both global and local percentiles are below threshold, one error is produced."""
+        enr = _make_enrichment_with_local(global_pct=0.18, local_pct=0.22)
+        errors = detect_errors(self._base_metrics(), self._base_role_profile(), enr)
+        gpm_errors = [e for e in errors if "GPM" in e.category]
+        assert len(gpm_errors) == 1
+        # Context must mention both global and local
+        assert "global" in gpm_errors[0].context.lower()
+        assert "game" in gpm_errors[0].context.lower() or "sample" in gpm_errors[0].context.lower()
+
+    def test_only_local_below_threshold_fires_error(self):
+        """When global is fine but local is below threshold, error still fires."""
+        enr = _make_enrichment_with_local(global_pct=0.52, local_pct=0.18)
+        errors = detect_errors(self._base_metrics(), self._base_role_profile(), enr)
+        gpm_errors = [e for e in errors if "GPM" in e.category]
+        assert len(gpm_errors) == 1
+
+    def test_both_above_threshold_no_error(self):
+        """When both global and local are above threshold, no error fires."""
+        enr = _make_enrichment_with_local(global_pct=0.55, local_pct=0.60)
+        errors = detect_errors(self._base_metrics(), self._base_role_profile(), enr)
+        gpm_errors = [e for e in errors if "GPM" in e.category]
+        assert len(gpm_errors) == 0

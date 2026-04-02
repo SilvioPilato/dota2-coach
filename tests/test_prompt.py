@@ -609,3 +609,81 @@ def test_lane_line_full_format_with_synergy_and_wr():
     )
     result = _lane_line(m)
     assert result == "- Lane: Juggernaut + Lion (synergy +8.3) vs Axe (48.2% WR) + Pudge (53.1% WR) \u2014 good lane synergy"
+
+
+from dota_coach.models import LocalBenchmark, LocalBenchmarkProgress
+
+
+def _make_metrics_for_prompt():
+    from dota_coach.models import MatchMetrics
+    return MatchMetrics(
+        match_id=1, hero="Anti-Mage", duration_minutes=35.0, result="loss",
+        lh_at_10=60, denies_at_10=5, deaths_before_10=0,
+        death_timestamps_laning=[], net_worth_at_10=8000, net_worth_at_20=16000,
+        opponent_net_worth_at_10=7500, opponent_net_worth_at_20=15000,
+        gpm=400, xpm=550, total_last_hits=180,
+        first_core_item_minute=None, first_core_item_name=None,
+        laning_heatmap_own_half_pct=0.4, ward_purchases=0,
+        teamfight_participation_rate=0.6, teamfight_avg_damage_contribution=None,
+        first_roshan_minute=None, first_tower_minute=None, turbo=False,
+    )
+
+
+def _make_enrichment_with_local_benchmarks():
+    from dota_coach.models import EnrichmentContext
+    return EnrichmentContext(
+        patch_name="7.37",
+        benchmarks=[],
+        item_costs={},
+        hero_base_stats={},
+        local_benchmarks=[
+            LocalBenchmark(metric="gold_per_min", player_value=400.0,
+                           player_pct=0.43, p25=350.0, median=480.0,
+                           p75=560.0, sample_size=45),
+        ],
+    )
+
+
+def _make_enrichment_with_progress():
+    from dota_coach.models import EnrichmentContext
+    return EnrichmentContext(
+        patch_name="7.37",
+        benchmarks=[],
+        item_costs={},
+        hero_base_stats={},
+        local_benchmark_progress=LocalBenchmarkProgress(
+            hero="Anti-Mage", matches_stored=12, threshold=30
+        ),
+    )
+
+
+class TestLocalBenchmarkPrompt:
+    def test_local_benchmark_block_appears_when_benchmarks_present(self):
+        """build_user_message includes LOCAL BENCHMARKS block when local_benchmarks non-empty."""
+        from dota_coach.prompt import build_user_message
+        msg = build_user_message(
+            _make_metrics_for_prompt(), [],
+            role=1, enrichment=_make_enrichment_with_local_benchmarks()
+        )
+        assert "LOCAL BENCHMARKS" in msg
+        assert "Anti-Mage" in msg
+        assert "43%" in msg  # player_pct
+
+    def test_progress_line_appears_when_below_threshold(self):
+        """build_user_message includes progress line when local_benchmark_progress is set."""
+        from dota_coach.prompt import build_user_message
+        msg = build_user_message(
+            _make_metrics_for_prompt(), [],
+            role=1, enrichment=_make_enrichment_with_progress()
+        )
+        assert "LOCAL BENCHMARKS" in msg
+        assert "12/30" in msg
+        assert "Anti-Mage" in msg
+
+    def test_no_local_benchmark_block_when_absent(self):
+        """No LOCAL BENCHMARKS section when enrichment has neither local_benchmarks nor progress."""
+        from dota_coach.prompt import build_user_message
+        from dota_coach.models import EnrichmentContext
+        enr = EnrichmentContext(patch_name="7.37", benchmarks=[], item_costs={}, hero_base_stats={})
+        msg = build_user_message(_make_metrics_for_prompt(), [], role=1, enrichment=enr)
+        assert "LOCAL BENCHMARKS" not in msg

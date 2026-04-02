@@ -295,6 +295,28 @@ def build_user_message(
             pct_info = f" ({e.player_pct:.0%} pct)" if e.player_pct is not None else ""
             lines.append(f"- [{e.severity.upper()}] {e.description} — {e.metric_value}{pct_info}")
 
+    # --- LOCAL BENCHMARKS block ---
+    local_benchmarks = getattr(enrichment, "local_benchmarks", []) if enrichment else []
+    local_progress   = getattr(enrichment, "local_benchmark_progress", None) if enrichment else None
+
+    if local_benchmarks and not metrics.turbo:
+        lines.append("")
+        sample_size = local_benchmarks[0].sample_size if local_benchmarks else 0
+        lines.append(f"LOCAL BENCHMARKS (your last {sample_size} non-turbo games on {metrics.hero}):")
+        for lb in local_benchmarks:
+            lines.append(
+                f"  {lb.metric}: player={lb.player_value:.0f}  "
+                f"local_pct={lb.player_pct:.0%}  "
+                f"median={lb.median:.0f}  p25={lb.p25:.0f}  p75={lb.p75:.0f}"
+            )
+    elif local_progress and not metrics.turbo:
+        lines.append("")
+        lines.append(
+            f"LOCAL BENCHMARKS: {local_progress.matches_stored}/{local_progress.threshold} "
+            f"non-turbo {local_progress.hero} games stored — "
+            "not enough for local percentiles yet."
+        )
+
     message = "\n".join(lines)
 
     # Token budget warning (approximate: 1 token ≈ 4 chars)

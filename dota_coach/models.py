@@ -110,6 +110,22 @@ class HeroBenchmark(BaseModel):
     bracket_avg: float       # value at ~50th percentile
 
 
+class LocalBenchmark(BaseModel):
+    metric: str              # "gold_per_min", "xp_per_min", "last_hits_per_min"
+    player_value: float
+    player_pct: float        # 0.0–1.0 percentile vs local sample
+    p25: float
+    median: float
+    p75: float
+    sample_size: int         # number of non-turbo matches in sample
+
+
+class LocalBenchmarkProgress(BaseModel):
+    hero: str
+    matches_stored: int
+    threshold: int = 30      # matches needed before local benchmarks activate
+
+
 class ItemBootstrapEntry(BaseModel):
     """A single entry from Stratz heroItemBootstrap, filtered and resolved."""
     item_id: int
@@ -129,6 +145,8 @@ class EnrichmentContext(BaseModel):
     item_timings: list[dict] = []        # OpenDota /heroes/{id}/itemTimings — [{item, time, games, wins}]
     hero_item_bootstrap: list[ItemBootstrapEntry] = []
     build_note: Optional[str] = None     # set when first_core_item not found in bootstrap
+    local_benchmarks: list[LocalBenchmark] = []
+    local_benchmark_progress: Optional[LocalBenchmarkProgress] = None
 
 
 class DetectedError(BaseModel):
@@ -158,6 +176,9 @@ class MatchReport(BaseModel):
     coaching_report: str = ""
     priority_focus: str = ""
     timeline: str = ""
+    local_benchmarks: list[LocalBenchmark] = []
+    local_benchmark_progress: Optional[LocalBenchmarkProgress] = None
+    metrics_only: bool = False
 
 
 class ChatTurn(BaseModel):
