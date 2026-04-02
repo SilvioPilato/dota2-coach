@@ -362,6 +362,15 @@ class TestCountHeroMatchesTurboFilter:
         assert result == 2
 
 
+def _save_n_matches(db_fixture, hero: str, n: int, gpm: int = 480, xpm: int = 600,
+                    total_lh: int = 200, duration: float = 35.0, turbo: bool = False):
+    """Module-level helper: save n matches for hero (used by standalone tests)."""
+    base = sum(ord(c) for c in hero) * 1000 + (50000 if turbo else 0)
+    for i in range(n):
+        r = _make_full_report(hero, gpm + i, xpm + i, total_lh + i, duration, turbo=turbo)
+        save_match_report(base + i, 1, 1, r)
+
+
 class TestGetLocalBenchmarks:
     def _save_n_matches(self, n: int, account_id: int, hero: str,
                         gpm: int = 480, xpm: int = 600,
@@ -443,3 +452,10 @@ class TestGetLocalBenchmarks:
         benchmarks, count = get_local_benchmarks(999, "Anti-Mage", ["gold_per_min"])
         assert benchmarks == []
         assert count == 0
+
+    def test_unknown_metric_name_returns_empty_benchmarks(self, temp_db):
+        """Unknown metric names are silently skipped."""
+        _save_n_matches(temp_db, "Anti-Mage", n=35)
+        benchmarks, count = get_local_benchmarks(1, "Anti-Mage", ["invalid_metric"])
+        assert benchmarks == []
+        assert count == 35

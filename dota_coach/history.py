@@ -161,7 +161,7 @@ def count_hero_matches(account_id: int, hero: str, turbo: bool | None = None) ->
                     WHERE account_id = ?
                       AND json_extract(report_json, '$.hero') = ?
                       AND json_extract(report_json, '$.turbo') = ?
-                    """,
+                    """,  # json_extract returns NULL for missing keys; MatchReport always serializes turbo via Pydantic
                     (account_id, hero, 1 if turbo else 0),
                 ).fetchone()
         return int(row["cnt"]) if row else 0
@@ -207,6 +207,7 @@ def _player_pct_from_sorted(values: list[float], player_value: float) -> float:
 
 
 _LOCAL_THRESHOLD = 30
+_LOCAL_MAX_SAMPLE = 500  # Max number of past matches to include in local percentile computation
 _METRIC_QUERY: dict[str, tuple[str, str | None]] = {
     # metric_name -> (primary_json_path, secondary_json_path_or_None)
     # secondary is used only for derived metrics (last_hits_per_min)
@@ -235,7 +236,7 @@ def get_local_benchmarks(
                 SELECT COUNT(*) as cnt FROM match_history
                 WHERE account_id = ?
                   AND json_extract(report_json, '$.hero') = ?
-                  AND json_extract(report_json, '$.turbo') = 0
+                  AND json_extract(report_json, '$.turbo') = 0  -- json_extract returns NULL for missing keys; MatchReport always serializes turbo via Pydantic
                 """,
                 (account_id, hero),
             ).fetchone()
@@ -250,6 +251,8 @@ def get_local_benchmarks(
                     continue
                 primary_path, secondary_path = _METRIC_QUERY[metric]
 
+                # primary_path and secondary_path are internal constants from _METRIC_QUERY,
+                # never user-controlled — safe to interpolate into SQL.
                 if secondary_path is None:
                     # Direct field
                     rows = conn.execute(
@@ -260,7 +263,7 @@ def get_local_benchmarks(
                           AND json_extract(report_json, '$.hero') = ?
                           AND json_extract(report_json, '$.turbo') = 0
                           AND json_extract(report_json, '{primary_path}') IS NOT NULL
-                        ORDER BY analyzed_at DESC, match_id DESC LIMIT 500
+                        ORDER BY analyzed_at DESC, match_id DESC LIMIT {_LOCAL_MAX_SAMPLE}
                         """,
                         (account_id, hero),
                     ).fetchall()
@@ -277,7 +280,7 @@ def get_local_benchmarks(
                           AND json_extract(report_json, '$.turbo') = 0
                           AND json_extract(report_json, '{primary_path}') IS NOT NULL
                           AND json_extract(report_json, '{secondary_path}') > 0
-                        ORDER BY analyzed_at DESC, match_id DESC LIMIT 500
+                        ORDER BY analyzed_at DESC, match_id DESC LIMIT {_LOCAL_MAX_SAMPLE}
                         """,
                         (account_id, hero),
                     ).fetchall()
@@ -293,6 +296,8 @@ def get_local_benchmarks(
                 sorted_vals = sorted(values)
                 # player_value = most recent match (first row in DESC order)
                 player_value = values[0]
+                # player_pct uses "fraction strictly below" convention (not interpolation) —
+                # matches differ from p25/median/p75 by design; intuitive for "beats X% of your games"
                 player_pct = _player_pct_from_sorted(sorted_vals, player_value)
 
                 result.append(LocalBenchmark(
