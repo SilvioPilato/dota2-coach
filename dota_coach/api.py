@@ -365,6 +365,28 @@ async def match_history(account_id: int, limit: int = 20):
     return JSONResponse(content=records)
 
 
+# ---------------------------------------------------------------------------
+# POST /import-history/{account_id}
+# ---------------------------------------------------------------------------
+
+@app.post("/import-history/{account_id}")
+async def import_history(account_id: int, limit: int = 50):
+    """Import recent matches for an account without running LLM analysis.
+
+    Fetches up to `limit` matches, extracts metrics, and saves them to the
+    history DB with metrics_only=True. Used to bootstrap local benchmark data.
+
+    Returns: {"imported": N, "skipped": M, "failed": K}
+    """
+    _STEAM64_BASE = 76561197960265728
+    if account_id > _STEAM64_BASE:
+        account_id = account_id - _STEAM64_BASE
+
+    from dota_coach.importer import import_match_metrics
+    result = await import_match_metrics(account_id, limit=limit)
+    return JSONResponse(content=result)
+
+
 @app.get("/report/{account_id}/{match_id}")
 async def get_report(account_id: int, match_id: int):
     """Return the stored MatchReport for a specific match (any role)."""
