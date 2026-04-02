@@ -377,3 +377,37 @@ class TestDiscoverLaneHeroes:
 
         # Should NOT be overwritten
         assert m.lane_enemies == ["Lina"]
+
+
+def test_enrich_accepts_account_id_param(monkeypatch):
+    """enrich() must accept account_id without raising TypeError."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from dota_coach.enricher import enrich
+    from dota_coach.models import MatchMetrics
+
+    # Minimal MatchMetrics — only fields enrich() reads
+    m = MatchMetrics(
+        match_id=1, hero="Anti-Mage", duration_minutes=35.0,
+        result="win", lh_at_10=60, denies_at_10=5, deaths_before_10=0,
+        death_timestamps_laning=[], net_worth_at_10=8000, net_worth_at_20=16000,
+        opponent_net_worth_at_10=7500, opponent_net_worth_at_20=15000,
+        gpm=480, xpm=600, total_last_hits=200,
+        first_core_item_minute=None, first_core_item_name=None,
+        laning_heatmap_own_half_pct=0.4, ward_purchases=0,
+        teamfight_participation_rate=0.6, teamfight_avg_damage_contribution=None,
+        first_roshan_minute=None, first_tower_minute=None,
+        turbo=False,
+    )
+    match_meta = {"players": [], "patch": "7.37"}
+
+    with patch("dota_coach.enricher._get_heroes_data", new_callable=AsyncMock, return_value={}), \
+         patch("dota_coach.enricher._get_benchmarks_cached", new_callable=AsyncMock, return_value={"result": {}}), \
+         patch("dota_coach.enricher.get_hero_bracket_benchmarks", new_callable=AsyncMock, return_value={}), \
+         patch("dota_coach.enricher._get_item_timings_cached", new_callable=AsyncMock, return_value=[]), \
+         patch("dota_coach.enricher._get_bootstrap_cached", new_callable=AsyncMock, return_value=[]), \
+         patch("dota_coach.enricher._get_items_data", new_callable=AsyncMock, return_value={}), \
+         patch("dota_coach.history.get_local_benchmarks", return_value=([], 0)):
+        ctx = asyncio.run(enrich(m, match_meta, account_id=123))
+
+    assert ctx is not None

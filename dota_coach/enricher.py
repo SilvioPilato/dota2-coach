@@ -11,7 +11,7 @@ import httpx
 
 from dota_coach.models import EnrichmentContext, HeroBenchmark
 from dota_coach.opendota import get_benchmarks
-from dota_coach.stratz import fetch_hero_ally_synergies, fetch_hero_matchup_winrates
+from dota_coach.stratz import fetch_hero_ally_synergies, fetch_hero_matchup_winrates, get_hero_bracket_benchmarks
 
 CACHE_DIR = Path.home() / ".dota_coach" / "cache"
 BENCHMARKS_TTL = 3600 * 6       # 6 hours
@@ -441,6 +441,7 @@ async def enrich(
     metrics: Any,
     match_meta: dict,
     purchased_items: list[str] | None = None,
+    account_id: int = 0,
 ) -> EnrichmentContext:
     """Build enrichment context for a match.
 
@@ -449,7 +450,7 @@ async def enrich(
         match_meta: OpenDota match metadata dict
         purchased_items: list of item internal names purchased (e.g. ["item_battle_fury"])
     """
-    from dota_coach.stratz import get_hero_bracket_benchmarks, rank_tier_to_stratz_bracket
+    from dota_coach.stratz import rank_tier_to_stratz_bracket
 
     heroes_data = await _get_heroes_data()
     hero_id = _find_hero_id(metrics.hero, heroes_data)
@@ -500,6 +501,29 @@ async def enrich(
                         bracket_avg=bracket_avg,
                     )
                 )
+
+    # --- Local benchmark integration (non-turbo only) ---
+    from dota_coach.history import get_local_benchmarks
+    from dota_coach.models import LocalBenchmarkProgress
+
+    LOCAL_THRESHOLD = 30
+    LOCAL_METRICS = ["gold_per_min", "xp_per_min", "last_hits_per_min"]
+
+    local_benchmarks_list: list = []
+    local_benchmark_progress = None
+
+    if not getattr(metrics, "turbo", False) and account_id:
+        _local_results, _sample_size = get_local_benchmarks(
+            account_id, metrics.hero, LOCAL_METRICS
+        )
+        if _sample_size < LOCAL_THRESHOLD:
+            local_benchmark_progress = LocalBenchmarkProgress(
+                hero=metrics.hero,
+                matches_stored=_sample_size,
+                threshold=LOCAL_THRESHOLD,
+            )
+        else:
+            local_benchmarks_list = _local_results
 
     # Fetch item timings for this hero (used for live timing benchmarks in detector)
     item_timings: list = []
@@ -552,4 +576,6 @@ async def enrich(
         bracket_source=bracket_source,
         item_timings=item_timings,
         hero_item_bootstrap=hero_item_bootstrap,
+        local_benchmarks=local_benchmarks_list,
+        local_benchmark_progress=local_benchmark_progress,
     )
