@@ -478,6 +478,8 @@ function renderReport(d) {
   renderTimeline(d.timeline || '');
 
   // Lane matchup
+  const oldLaneMatchup = document.getElementById('laneMatchup');
+  if (oldLaneMatchup) oldLaneMatchup.remove();
   const laneHtml = renderLaneMatchup(d);
   if (laneHtml) {
     const metricCardsDiv = document.querySelector('#metricCards');
@@ -988,7 +990,8 @@ async function loadSidebarPage(accountId) {
       sidebarOffset += 20;
       if (sentinel) sentinel.innerHTML = '';
       // If content doesn't yet overflow the container, the observer won't fire
-      // on scroll — proactively load the next page.
+      // on scroll — proactively load the next page. Reset flag first to allow recursion.
+      sidebarLoading = false;
       if (list.scrollHeight <= list.clientHeight) loadSidebarPage(accountId);
     }
   } catch (e) {
